@@ -178,18 +178,18 @@ corepack pnpm tauri build
 
 ```text
 src-tauri/resources/
-?? agent/
-?  ?? skills.json
-?? bin/
-?  ?? DirectML.dll
-?  ?? onnxruntime.dll
-?  ?? sherpa-onnx-*.dll
-?? dy-mcp/
-?? ffmpeg/
-?  ?? ffmpeg.exe
-?  ?? ffprobe.exe
-?? python-embed/
-?? runtime-manifest.json
+|- agent/
+|  `- skills.json
+|- bin/
+|  |- DirectML.dll
+|  |- onnxruntime.dll
+|  `- sherpa-onnx-*.dll
+|- dy-mcp/
+|- ffmpeg/
+|  |- ffmpeg.exe
+|  `- ffprobe.exe
+|- python-embed/
+`- runtime-manifest.json
 ```
 
 这样做的目的，是让安装包具备更稳定的“真正可分发”结构，而不是依赖开发机本地环境。
