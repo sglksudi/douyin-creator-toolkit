@@ -1,0 +1,367 @@
+:root {
+    --bg-dark: #050505;
+    --text-white: #ffffff;
+    --text-grey: #888888;
+
+    /* Brand Colors */
+    --brand-green: #00C55E;
+    /* From reference */
+    --brand-blue: #3B82F6;
+    --brand-purple: #8B5CF6;
+    --brand-red: #F43F5E;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, BlinkMacSystemFont, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+body {
+    background-color: var(--bg-dark);
+    /* Subtle noise texture or radial gradient for depth */
+    background-image: radial-gradient(circle at 15% 50%, rgba(20, 20, 20, 1) 0%, var(--bg-dark) 40%);
+    color: var(--text-white);
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.slides-container {
+    width: 100vw;
+    height: 100vh;
+    position: relative;
+    perspective: 1000px;
+}
+
+.slide {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 8%;
+
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.98) translateZ(-50px);
+    transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+    /* Apple-like ease */
+}
+
+.slide.active {
+    opacity: 1;
+    pointer-events: all;
+    transform: scale(1) translateZ(0);
+}
+
+.content-wrapper {
+    display: grid;
+    grid-template-columns: 0.8fr 1.2fr;
+    /* Text narrower, image wider */
+    gap: 60px;
+    width: 100%;
+    max-width: 1400px;
+    align-items: center;
+}
+
+/* --- Text Column Styling --- */
+.text-column {
+    text-align: left;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    z-index: 10;
+}
+
+/* Badge styled like reference "【开源免费】" */
+.badge {
+    color: var(--brand-green);
+    font-size: 1.1rem;
+    font-weight: 700;
+    margin-bottom: 16px;
+    letter-spacing: 1px;
+    text-shadow: 0 0 20px rgba(0, 197, 94, 0.3);
+}
+
+.badge-blue {
+    color: var(--brand-blue);
+    text-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
+}
+
+.badge-purple {
+    color: var(--brand-purple);
+    text-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+}
+
+.badge-red {
+    color: var(--brand-red);
+    text-shadow: 0 0 20px rgba(244, 63, 94, 0.3);
+}
+
+/* Main Title */
+.hero-title {
+    font-size: 5rem;
+    line-height: 1.1;
+    font-weight: 800;
+    margin-bottom: 20px;
+    background: linear-gradient(180deg, #FFFFFF 0%, #a0a0a0 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -2px;
+}
+
+.hero-subtitle {
+    font-size: 2.2rem;
+    color: #DDDDDD;
+    font-weight: 600;
+    margin-bottom: 20px;
+}
+
+.description {
+    font-size: 1.25rem;
+    color: var(--text-grey);
+    line-height: 1.6;
+    margin-bottom: 40px;
+    font-weight: 400;
+}
+
+.feature-list {
+    list-style: none;
+    margin-bottom: 40px;
+}
+
+.feature-list li {
+    font-size: 1.2rem;
+    color: #ccc;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Green pill button style from reference */
+.cta-box {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255, 255, 255, 0.08);
+    /* Dark glass */
+    padding: 12px 24px;
+    border-radius: 50px;
+    font-size: 1.1rem;
+    color: #fff;
+    font-weight: 600;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    width: fit-content;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+}
+
+.cta-icon {
+    font-size: 1.2rem;
+}
+
+/* --- Visual Column Styling --- */
+.visual-column {
+    position: relative;
+    height: 600px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* The floating card effect from the screenshot */
+.floating-mockup {
+    position: relative;
+    border-radius: 20px;
+    background: #1a1a1a;
+    /* Fallback */
+    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6),
+        0 0 0 1px rgba(255, 255, 255, 0.1);
+    /* Subtle border */
+    overflow: hidden;
+    transition: transform 0.5s ease;
+}
+
+/* Main hero mockup */
+.main-mockup img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 20px;
+}
+
+/* Tech Grid Slide */
+.tech-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 30px;
+}
+
+.tech-item {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 20px;
+    padding: 30px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 15px;
+    width: 200px;
+    height: 200px;
+    transition: transform 0.3s;
+}
+
+.tech-item:hover {
+    transform: translateY(-10px);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+}
+
+.tech-item img {
+    width: 60px;
+    height: 60px;
+    object-fit: contain;
+}
+
+.tech-item span {
+    font-size: 1.2rem;
+    font-weight: 500;
+}
+
+/* Stacked Visuals for Feature Slide */
+.stacked-visuals .card-1 {
+    position: absolute;
+    top: 50%;
+    left: 45%;
+    transform: translate(-50%, -50%) rotate(-5deg);
+    z-index: 1;
+    width: 65%;
+}
+
+.stacked-visuals .card-2 {
+    position: absolute;
+    top: 50%;
+    left: 55%;
+    transform: translate(-50%, -50%) rotate(5deg) scale(1.05);
+    z-index: 2;
+    width: 65%;
+    box-shadow: 0 40px 80px rgba(0, 0, 0, 0.8);
+}
+
+.stacked-visuals img {
+    width: 100%;
+    border-radius: 12px;
+}
+
+/* Settings Mockup */
+.settings-mockup {
+    transform: rotateY(-10deg) rotateX(5deg);
+    transform-style: preserve-3d;
+    perspective: 1000px;
+    width: 90%;
+    /* Limit width */
+}
+
+.settings-mockup img {
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+    display: block;
+}
+
+
+/* Animations */
+.slide.active .text-column>* {
+    animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    opacity: 0;
+}
+
+.slide.active .badge {
+    animation-delay: 0.1s;
+}
+
+.slide.active .hero-title {
+    animation-delay: 0.2s;
+}
+
+.slide.active .hero-subtitle {
+    animation-delay: 0.25s;
+}
+
+.slide.active .description {
+    animation-delay: 0.3s;
+}
+
+.slide.active .cta-box {
+    animation-delay: 0.4s;
+}
+
+.slide.active .feature-list {
+    animation-delay: 0.35s;
+}
+
+.slide.active .visual-column {
+    animation: floatIn 1s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    opacity: 0;
+    transform: translateX(50px);
+}
+
+@keyframes slideUpFade {
+    from {
+        transform: translateY(30px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes floatIn {
+    from {
+        transform: translateX(50px) scale(0.95);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateX(0) scale(1);
+        opacity: 1;
+    }
+}
+
+
+/* Nav Hint */
+.nav-hint {
+    position: fixed;
+    bottom: 30px;
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 0.9rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.progress-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.1);
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--brand-green);
+    width: 0%;
+    transition: width 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+}

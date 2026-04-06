@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+
+  /* Color Palette Extensions */
+  --color-zinc-850: #1f1f22;
+  --color-zinc-950: #0c0c0e;
+}
+
+/* 基础样式与变量定义 */
+:root {
+  color-scheme: light dark;
+
+  /* HSL 变量定义 - 方便透明度操作 */
+  --background-hsl: 0 0% 100%;
+  --foreground-hsl: 240 10% 3.9%;
+
+  --card-hsl: 0 0% 100%;
+  --card-foreground-hsl: 240 10% 3.9%;
+
+  --popover-hsl: 0 0% 100%;
+  --popover-foreground-hsl: 240 10% 3.9%;
+
+  --primary-hsl: 221 83% 53%;
+  /* Vivid Blue #2563EB */
+  --primary-foreground-hsl: 0 0% 98%;
+
+  --secondary-hsl: 240 4.8% 95.9%;
+  --secondary-foreground-hsl: 240 5.9% 10%;
+
+  --muted-hsl: 240 4.8% 95.9%;
+  --muted-foreground-hsl: 240 3.8% 46.1%;
+
+  --accent-hsl: 240 4.8% 95.9%;
+  --accent-foreground-hsl: 240 5.9% 10%;
+
+  --destructive-hsl: 0 84.2% 60.2%;
+  --destructive-foreground-hsl: 0 0% 98%;
+
+  --border-hsl: 240 5.9% 90%;
+  --input-hsl: 240 5.9% 90%;
+  --ring-hsl: 221 83% 53%;
+
+  --radius: 0.75rem;
+}
+
+@layer base {
+  * {
+    @apply border-[hsl(var(--border-hsl))];
+  }
+
+  body {
+    @apply bg-[hsl(var(--background-hsl))] text-[hsl(var(--foreground-hsl))] antialiased selection:bg-blue-500 selection:text-white;
+  }
+
+  /* 滚动条美化 */
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-zinc-300 dark:bg-zinc-700 rounded-full hover:bg-zinc-400 dark:hover:bg-zinc-600 transition-colors;
+  }
+}
+
+@layer utilities {
+
+  /* 玻璃拟态面板 */
+  .glass-panel {
+    @apply bg-white/70 dark:bg-zinc-900/70 backdrop-blur-xl border border-white/20 dark:border-white/5 shadow-sm;
+  }
+
+  /* 高级卡片 - 悬浮效果 */
+  .card-hover {
+    @apply transition-all duration-300 hover:shadow-lg hover:-translate-y-[2px] hover:border-blue-500/30 dark:hover:border-blue-500/30;
+  }
+
+  /* 细微边框 */
+  .subtle-border {
+    @apply border border-zinc-200/60 dark:border-zinc-800/60;
+  }
+
+  /* 渐变文字 */
+  .text-gradient {
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-blue-600 to-indigo-600 dark:from-blue-400 dark:to-indigo-400;
+  }
+
+  /* 容器居中 */
+  .container-centered {
+    @apply max-w-5xl mx-auto px-6;
+  }
+
+  /* 动画工具类 */
+  .animate-enter {
+    animation: enter 0.4s ease-out forwards;
+  }
+
+  .delay-100 {
+    animation-delay: 100ms;
+  }
+
+  .delay-200 {
+    animation-delay: 200ms;
+  }
+
+  .delay-300 {
+    animation-delay: 300ms;
+  }
+}
+
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Lucide 图标默认样式 */
+.lucide {
+  @apply stroke-[1.5];
+  /* 更细的线条，更精致 */
+}
+
+@keyframes progress-indeterminate {
+  0% {
+    transform: translateX(-100%) scaleX(0.2);
+  }
+
+  50% {
+    transform: translateX(0%) scaleX(0.5);
+  }
+
+  100% {
+    transform: translateX(100%) scaleX(0.2);
+  }
+}
+
+.animate-indeterminate-loading {
+  animation: progress-indeterminate 1.5s infinite linear;
+}
