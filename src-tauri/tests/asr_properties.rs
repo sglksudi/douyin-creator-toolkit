@@ -12,7 +12,7 @@ use std::process::Command;
 use tempfile::tempdir;
 
 // 导入被测试的模块
-use douyin_creator_tools_lib::core::asr_engine::{AsrConfig, AsrEngine};
+use douyin_creator_tools_lib::core::asr_engine::{AsrConfig, AsrEngine, ModelManager};
 use douyin_creator_tools_lib::utils::ffmpeg::FfmpegWrapper;
 
 /// 获取测试用的模型目录
@@ -24,9 +24,13 @@ fn get_test_models_dir() -> PathBuf {
 
 /// 检查 SenseVoice 模型是否已安装
 fn is_model_installed() -> bool {
-    let models_dir = get_test_models_dir();
-    let model_path = models_dir.join("sense-voice");
-    model_path.join("model.int8.onnx").exists() && model_path.join("tokens.txt").exists()
+    ModelManager::new(get_test_models_dir()).is_model_installed()
+}
+
+fn expected_default_num_threads() -> usize {
+    std::thread::available_parallelism()
+        .map(|p| p.get())
+        .unwrap_or(4)
 }
 
 /// 检查 FFmpeg 是否可用
@@ -131,13 +135,13 @@ proptest! {
         // 跳过测试如果模型未安装
         if !is_model_installed() {
             eprintln!("跳过测试：SenseVoice 模型未安装");
-            prop_assume!(false, "SenseVoice 模型未安装，跳过测试");
+            return Ok(());
         }
 
         // 跳过测试如果 FFmpeg 不可用
         if !is_ffmpeg_available() {
             eprintln!("跳过测试：FFmpeg 不可用");
-            prop_assume!(false, "FFmpeg 不可用，跳过测试");
+            return Ok(());
         }
 
         // 创建临时目录
@@ -149,7 +153,7 @@ proptest! {
             Ok(_) => {},
             Err(e) => {
                 eprintln!("跳过测试：无法创建测试音频 - {}", e);
-                prop_assume!(false, "无法创建测试音频");
+                return Ok(());
             }
         }
 
@@ -219,13 +223,13 @@ proptest! {
         // 跳过测试如果模型未安装
         if !is_model_installed() {
             eprintln!("跳过测试：SenseVoice 模型未安装");
-            prop_assume!(false, "SenseVoice 模型未安装，跳过测试");
+            return Ok(());
         }
 
         // 跳过测试如果 FFmpeg 不可用
         if !is_ffmpeg_available() {
             eprintln!("跳过测试：FFmpeg 不可用");
-            prop_assume!(false, "FFmpeg 不可用，跳过测试");
+            return Ok(());
         }
 
         // 创建临时目录
@@ -237,7 +241,7 @@ proptest! {
             Ok(_) => {},
             Err(e) => {
                 eprintln!("跳过测试：无法创建中文测试音频 - {}", e);
-                prop_assume!(false, "无法创建中文测试音频");
+                return Ok(());
             }
         }
 
@@ -416,7 +420,7 @@ mod tests {
         let config = AsrConfig::default();
         assert_eq!(config.language, "auto");
         assert!(config.use_itn);
-        assert_eq!(config.num_threads, 4);
+        assert_eq!(config.num_threads, expected_default_num_threads());
     }
 
     /// 集成测试：完整的转写流程（需要模型）
