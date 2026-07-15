@@ -4,5 +4,6 @@ pub mod contact_sheet;
 pub mod evidence_timeline;
 pub mod frame_sampling;
 pub mod report;
+pub mod runner;
 pub mod time_format;
 pub mod types;
