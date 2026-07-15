@@ -226,3 +226,18 @@ impl From<AgentSkillDefinition> for AgentSkillSummary {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn loads_deep_video_skills() {
+        let skills = AgentSkillLoader::load().unwrap();
+
+        assert!(skills.iter().any(|skill| skill.id == "deep-video-breakdown"));
+        assert!(skills
+            .iter()
+            .any(|skill| skill.id == "visual-script-consistency"));
+    }
+}

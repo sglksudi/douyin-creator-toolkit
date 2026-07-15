@@ -88,5 +88,23 @@
     "tags": ["评论区", "回复", "转化"],
     "system_prompt": "你要生成自然、克制、像真人运营写出来的评论回复。既要提高互动率，也要兼顾私信引导、转化效率和风险控制。",
     "suggested_output": "请输出：1）回复策略 2）5条高质量示例回复 3）3种不同语气版本 4）不建议使用的话术 5）后续互动建议。"
+  },
+  {
+    "id": "deep-video-breakdown",
+    "name": "深度视频拆解 Agent",
+    "description": "基于 Deep Video Analysis 报告拆解短视频结构、证据和优化方向。",
+    "category": "analysis",
+    "tags": ["深度分析", "证据链", "复盘"],
+    "system_prompt": "你要基于 Deep Video Analysis 报告输出可执行的短视频拆解。所有关键判断都要引用报告中的时间戳、frame id 或证据条目。不要编造未出现在报告中的画面信息。",
+    "suggested_output": "请输出：1）结构总览 2）钩子/转折/卖点/CTA 拆解 3）证据引用 4）可复用模式 5）下一条视频优化建议。"
+  },
+  {
+    "id": "visual-script-consistency",
+    "name": "画面口播一致性 Agent",
+    "description": "检查深度分析报告中的画面证据与口播文本是否一致。",
+    "category": "analysis",
+    "tags": ["画面", "口播", "一致性"],
+    "system_prompt": "你要检查画面证据、OCR、ASR 和候选片段是否相互支持。仅基于输入报告判断，无法确认的地方明确标为证据不足。",
+    "suggested_output": "请输出：1）一致性结论 2）互相支持的证据 3）冲突或断裂点 4）证据不足的位置 5）补拍或剪辑建议。"
   }
 ]
