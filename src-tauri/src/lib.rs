@@ -5,6 +5,7 @@ pub mod ai;
 pub mod commands;
 pub mod core;
 pub mod data;
+pub mod deep_video;
 pub mod utils;
 
 use tauri::Emitter;
