@@ -1,5 +1,6 @@
 pub mod artifacts;
 pub mod candidate_mining;
+pub mod contact_sheet;
 pub mod evidence_timeline;
 pub mod frame_sampling;
 pub mod report;

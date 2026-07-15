@@ -73,6 +73,10 @@ futures-util = { version = "0.3", default-features = false, features = ["std"] }
 # Base64 编码
 base64 = "0.22"
 
+# 图像处理（用于 Deep Video contact sheet）
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+font8x8 = "0.3"
+
 # Word 文档生成
 docx-rs = "0.4"
 
