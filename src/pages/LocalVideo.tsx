@@ -23,7 +23,13 @@ import {
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { useVideoStore, VideoItem, AnalysisResult } from "@/stores/useVideoStore";
+import {
+  useVideoStore,
+  type VideoItem,
+  type AnalysisResult,
+  type DeepAnalysisProfile,
+  type DeepAnalysisState,
+} from "@/stores/useVideoStore";
 import { useToast } from "@/hooks/useToast";
 import { AIChatModal } from "@/components/AIChatModal";
 import { useAppStore } from "@/stores/useAppStore";
@@ -39,6 +45,7 @@ export function LocalVideo() {
     toggleExpanded,
     processAllVideos,
     analyzeVideo,
+    startDeepAnalysis,
     exportToDocx,
     exportToTxt,
     setupProgressListener,
@@ -49,6 +56,8 @@ export function LocalVideo() {
   const { toast } = useToast();
   const [isDragging, setIsDragging] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
+  const [deepProfile, setDeepProfile] = useState<DeepAnalysisProfile>("balanced");
+  const [deepAnalyzingId, setDeepAnalyzingId] = useState<string | null>(null);
 
   // Chat Modal State
   const [chatOpen, setChatOpen] = useState(false);
@@ -153,6 +162,18 @@ export function LocalVideo() {
       toast({ title: "分析失败", description: String(error), variant: "error" });
     } finally {
       setAnalyzingId(null);
+    }
+  };
+
+  const handleDeepAnalyze = async (video: VideoItem) => {
+    setDeepAnalyzingId(video.id);
+    try {
+      await startDeepAnalysis(video.id, deepProfile);
+      toast({ title: "深度分析已启动", description: "证据图和报告会写入本地任务产物目录" });
+    } catch (error) {
+      toast({ title: "深度分析失败", description: String(error), variant: "error" });
+    } finally {
+      setDeepAnalyzingId(null);
     }
   };
 
@@ -337,6 +358,15 @@ export function LocalVideo() {
       case "processing": return `${video.stage === "extracting_audio" ? "提取音频" : "转写文案"} ${video.progress}%`;
       case "completed": return "已完成";
       case "failed": return "处理失败";
+    }
+  };
+
+  const getDeepAnalysisStatusText = (analysis: DeepAnalysisState) => {
+    switch (analysis.status) {
+      case "idle": return "未开始";
+      case "running": return analysis.progress ? `分析中 ${analysis.progress}%` : "分析中";
+      case "completed": return "已完成";
+      case "failed": return "失败";
     }
   };
 
@@ -553,7 +583,7 @@ export function LocalVideo() {
                           <FileText className="w-4 h-4 text-blue-500" />
                           文案内容
                         </h5>
-                        <div className="flex gap-2">
+                        <div className="flex flex-wrap justify-end gap-2">
                           <Button size="sm" variant="outline" className="h-8 text-xs bg-white dark:bg-zinc-800" onClick={() => handleCopyTranscript(video.transcript!)}>
                             <Copy className="w-3.5 h-3.5 mr-1.5" /> 复制全文
                           </Button>
@@ -577,6 +607,26 @@ export function LocalVideo() {
                             <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                             {analyzingId === video.id ? "智能分析中..." : "AI 深度分析"}
                           </Button>
+                          <select
+                            value={deepProfile}
+                            onChange={(event) => setDeepProfile(event.target.value as DeepAnalysisProfile)}
+                            className="h-8 rounded-md border border-teal-200 bg-white px-2 text-xs text-teal-700 shadow-sm outline-none transition-colors hover:bg-teal-50 focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-teal-800 dark:bg-zinc-900 dark:text-teal-300 dark:hover:bg-teal-950/30"
+                            aria-label="证据链分析档位"
+                          >
+                            <option value="economy">省钱</option>
+                            <option value="balanced">均衡</option>
+                            <option value="precise">精准</option>
+                          </select>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs bg-teal-50 text-teal-700 border-teal-200 hover:bg-teal-100 dark:bg-teal-950/20 dark:text-teal-300 dark:border-teal-800"
+                            onClick={() => handleDeepAnalyze(video)}
+                            disabled={deepAnalyzingId === video.id || video.deepAnalysis?.status === "running"}
+                          >
+                            <Layers className="w-3.5 h-3.5 mr-1.5" />
+                            {deepAnalyzingId === video.id ? "证据分析中..." : "证据链分析"}
+                          </Button>
                           <Button
                             size="sm"
                             variant="outline"
@@ -593,6 +643,41 @@ export function LocalVideo() {
                       <div className="bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 p-5 shadow-sm text-[15px] leading-relaxed text-zinc-700 dark:text-zinc-300 max-h-[400px] overflow-y-auto whitespace-pre-wrap font-sans">
                         {video.transcript}
                       </div>
+
+                      {video.deepAnalysis && (
+                        <div className="mt-4 rounded-lg border border-teal-200/80 bg-teal-50/70 p-3 text-xs text-teal-800 shadow-sm dark:border-teal-900/80 dark:bg-teal-950/20 dark:text-teal-200">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Layers className="w-4 h-4 text-teal-600 dark:text-teal-300" />
+                            <span className="font-medium">证据链分析</span>
+                            <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-teal-700 dark:bg-teal-900/50 dark:text-teal-200">
+                              {getDeepAnalysisStatusText(video.deepAnalysis)}
+                            </span>
+                          </div>
+                          {video.deepAnalysis.status === "running" && video.deepAnalysis.progress !== undefined && (
+                            <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-teal-100 dark:bg-teal-950">
+                              <div
+                                className="h-full rounded-full bg-teal-500 transition-all duration-300"
+                                style={{ width: `${video.deepAnalysis.progress}%` }}
+                              />
+                            </div>
+                          )}
+                          {video.deepAnalysis.taskId && (
+                            <div className="mt-2 break-all text-teal-700/80 dark:text-teal-200/80">
+                              任务：{video.deepAnalysis.taskId}
+                            </div>
+                          )}
+                          {video.deepAnalysis.resultPath && (
+                            <div className="mt-1 break-all text-teal-700/80 dark:text-teal-200/80">
+                              结果：{video.deepAnalysis.resultPath}
+                            </div>
+                          )}
+                          {video.deepAnalysis.error && (
+                            <div className="mt-2 break-all text-red-600 dark:text-red-400">
+                              {video.deepAnalysis.error}
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                       {/* AI 分析结果展示区域 - 如果有 */}
                       {video.analysisStatus === "completed" && video.analysis && (

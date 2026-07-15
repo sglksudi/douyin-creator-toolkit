@@ -51,6 +51,16 @@ export interface AnalysisResult {
   references: KnowledgeReference[];
 }
 
+export type DeepAnalysisProfile = "economy" | "balanced" | "precise";
+
+export interface DeepAnalysisState {
+  status: "idle" | "running" | "completed" | "failed";
+  taskId?: string;
+  progress?: number;
+  resultPath?: string;
+  error?: string;
+}
+
 export interface VideoItem extends VideoInfo {
   status: "pending" | "processing" | "completed" | "failed";
   progress: number;
@@ -62,6 +72,7 @@ export interface VideoItem extends VideoInfo {
   analysis?: AnalysisResult;
   analysisStatus?: "idle" | "analyzing" | "completed" | "failed";
   analysisError?: string;
+  deepAnalysis?: DeepAnalysisState;
 }
 
 export interface ProcessProgress {
@@ -75,6 +86,22 @@ export interface TranscriptResult {
   video_id: string;
   text: string;
   duration_ms: number;
+}
+
+interface TaskProgressEvent {
+  task_id: string;
+  progress: number;
+  status: string;
+}
+
+interface TaskCompletedEvent {
+  task_id: string;
+  result?: string | null;
+}
+
+interface TaskFailedEvent {
+  task_id: string;
+  error: string;
 }
 
 export interface BatchProcessResult {
@@ -109,6 +136,7 @@ interface VideoStore {
 
   // AI Analysis
   analyzeVideo: (id: string) => Promise<void>;
+  startDeepAnalysis: (id: string, profile: DeepAnalysisProfile) => Promise<void>;
 
   // Export
   exportToDocx: (outputPath: string) => Promise<string>;
@@ -276,7 +304,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
   },
 
   setupProgressListener: async () => {
-    const unlisten = await listen<ProcessProgress>("video-process-progress", (event) => {
+    const unlistenVideoProgress = await listen<ProcessProgress>("video-process-progress", (event) => {
       const progress = event.payload;
 
       set((state) => ({
@@ -292,7 +320,70 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
       }));
     });
 
-    return unlisten;
+    const unlistenTaskProgress = await listen<TaskProgressEvent>("task-progress", (event) => {
+      const progress = event.payload;
+
+      set((state) => ({
+        videos: state.videos.map((v) =>
+          v.deepAnalysis?.taskId === progress.task_id
+            ? {
+              ...v,
+              deepAnalysis: {
+                ...v.deepAnalysis,
+                status: progress.status === "completed" ? "completed" : "running",
+                progress: Math.round(progress.progress * 100),
+              },
+            }
+            : v
+        ),
+      }));
+    });
+
+    const unlistenTaskCompleted = await listen<TaskCompletedEvent>("task-completed", (event) => {
+      const completed = event.payload;
+
+      set((state) => ({
+        videos: state.videos.map((v) =>
+          v.deepAnalysis?.taskId === completed.task_id
+            ? {
+              ...v,
+              deepAnalysis: {
+                ...v.deepAnalysis,
+                status: "completed",
+                progress: 100,
+                resultPath: completed.result ?? undefined,
+              },
+            }
+            : v
+        ),
+      }));
+    });
+
+    const unlistenTaskFailed = await listen<TaskFailedEvent>("task-failed", (event) => {
+      const failed = event.payload;
+
+      set((state) => ({
+        videos: state.videos.map((v) =>
+          v.deepAnalysis?.taskId === failed.task_id
+            ? {
+              ...v,
+              deepAnalysis: {
+                ...v.deepAnalysis,
+                status: "failed",
+                error: failed.error,
+              },
+            }
+            : v
+        ),
+      }));
+    });
+
+    return () => {
+      unlistenVideoProgress();
+      unlistenTaskProgress();
+      unlistenTaskCompleted();
+      unlistenTaskFailed();
+    };
   },
 
   exportToDocx: async (outputPath: string) => {
@@ -376,6 +467,53 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
               analysisStatus: "failed" as const,
               analysisError: String(error),
             }
+            : v
+        ),
+      }));
+      throw error;
+    }
+  },
+
+  startDeepAnalysis: async (id: string, profile: DeepAnalysisProfile) => {
+    const { videos } = get();
+    const video = videos.find((v) => v.id === id);
+    if (!video) return;
+
+    set((state) => ({
+      videos: state.videos.map((v) =>
+        v.id === id
+          ? { ...v, deepAnalysis: { status: "running" as const, progress: 0 } }
+          : v
+      ),
+    }));
+
+    try {
+      const taskId = await invoke<string>("start_deep_video_analysis", {
+        request: {
+          source: { local_video: { video_path: video.path } },
+          task_id: video.id,
+          title: video.name,
+          profile,
+          transcript: video.transcript
+            ? { text: video.transcript, segments: [] }
+            : null,
+          ocr_items: [],
+          reference_text: null,
+        },
+      });
+
+      set((state) => ({
+        videos: state.videos.map((v) =>
+          v.id === id
+            ? { ...v, deepAnalysis: { status: "running" as const, taskId, progress: 0 } }
+            : v
+        ),
+      }));
+    } catch (error) {
+      set((state) => ({
+        videos: state.videos.map((v) =>
+          v.id === id
+            ? { ...v, deepAnalysis: { status: "failed" as const, error: String(error) } }
             : v
         ),
       }));
