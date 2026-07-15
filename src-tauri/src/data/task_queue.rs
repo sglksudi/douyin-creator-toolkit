@@ -7,6 +7,8 @@ use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::RwLock;
 
+use crate::deep_video::types::AnalysisProfile;
+
 #[derive(Error, Debug)]
 pub enum QueueError {
     #[error("任务不存在: {0}")]
@@ -36,6 +38,12 @@ pub enum TaskType {
         content: String,
         video_id: String,
     },
+    DeepVideoAnalysis {
+        video_path: String,
+        video_name: String,
+        profile: AnalysisProfile,
+        transcript_task_id: Option<String>,
+    },
 }
 
 impl TaskType {
@@ -51,6 +59,9 @@ impl TaskType {
                 format!("下载视频: {}", video_name)
             }
             TaskType::AiAnalysis { .. } => "AI 分析".to_string(),
+            TaskType::DeepVideoAnalysis { video_name, .. } => {
+                format!("深度视频分析: {}", video_name)
+            }
         }
     }
 }

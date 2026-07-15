@@ -4,6 +4,7 @@
 pub mod ai;
 pub mod agent;
 pub mod asr;
+pub mod deep_video;
 pub mod gpu;
 pub mod mcp;
 pub mod settings;
@@ -15,6 +16,7 @@ pub mod video;
 pub use ai::*;
 pub use agent::*;
 pub use asr::*;
+pub use deep_video::*;
 pub use gpu::{
     detect_gpu_info, get_recommended_gpu_config, validate_gpu_config, GpuConfig, RecommendedConfig,
 };

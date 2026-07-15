@@ -24,6 +24,16 @@ pub struct TaskInfo {
     pub result: Option<String>,
 }
 
+pub fn task_type_label(task_type: &TaskType) -> &'static str {
+    match task_type {
+        TaskType::VideoTranscription { .. } => "video_transcription",
+        TaskType::LinkParsing { .. } => "link_parsing",
+        TaskType::VideoDownload { .. } => "video_download",
+        TaskType::AiAnalysis { .. } => "ai_analysis",
+        TaskType::DeepVideoAnalysis { .. } => "deep_video_analysis",
+    }
+}
+
 impl From<Task> for TaskInfo {
     fn from(task: Task) -> Self {
         let (status, error) = match &task.status {
@@ -35,12 +45,7 @@ impl From<Task> for TaskInfo {
             TaskStatus::Cancelled => ("cancelled".to_string(), None),
         };
         
-        let task_type = match &task.task_type {
-            TaskType::VideoTranscription { .. } => "video_transcription",
-            TaskType::LinkParsing { .. } => "link_parsing",
-            TaskType::VideoDownload { .. } => "video_download",
-            TaskType::AiAnalysis { .. } => "ai_analysis",
-        };
+        let task_type = task_type_label(&task.task_type);
         
         TaskInfo {
             id: task.id,
@@ -245,4 +250,22 @@ pub fn emit_task_failed(app: &AppHandle, task_id: &str, error: &str) {
 /// 获取全局任务队列实例（供其他模块使用）
 pub fn get_task_queue() -> &'static TaskQueue {
     &TASK_QUEUE
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deep_video::types::AnalysisProfile;
+
+    #[test]
+    fn maps_deep_video_task_type_label() {
+        let task_type = TaskType::DeepVideoAnalysis {
+            video_path: "sample.mp4".to_string(),
+            video_name: "sample.mp4".to_string(),
+            profile: AnalysisProfile::Economy,
+            transcript_task_id: None,
+        };
+
+        assert_eq!(task_type_label(&task_type), "deep_video_analysis");
+    }
 }

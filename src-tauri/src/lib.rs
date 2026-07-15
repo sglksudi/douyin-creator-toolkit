@@ -210,6 +210,8 @@ pub fn run() {
             commands::task_queue::get_current_task,
             commands::task_queue::clear_task_history,
             commands::task_queue::clear_pending_tasks,
+            commands::deep_video::start_deep_video_analysis,
+            commands::deep_video::get_deep_video_result,
             // 托盘命令
             commands::tray::show_window,
             commands::tray::hide_to_tray,
