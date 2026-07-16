@@ -157,6 +157,7 @@ pub fn run() {
             // AI 分析命令
             commands::ai::analyze_content,
             commands::ai::check_lm_studio,
+            commands::ai::check_custom_api_provider,
             commands::ai::init_knowledge_base,
             commands::ai::add_document_to_kb,
             commands::ai::search_knowledge_base,

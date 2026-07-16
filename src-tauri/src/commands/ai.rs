@@ -1,7 +1,9 @@
 // AI 相关命令
 
 use crate::ai::knowledge_base::{Document, KnowledgeBase, SearchResult};
-use crate::ai::service::{AiProviderType, AiService, AnalysisResult, ChatMessage};
+use crate::ai::service::{
+    AiService, AnalysisResult, ChatMessage, CustomApiProvider, CustomApiProviderConfig,
+};
 use crate::utils::paths::get_app_paths;
 use once_cell::sync::Lazy;
 use parking_lot::Mutex;
@@ -35,6 +37,7 @@ pub struct AiSettings {
     pub openai_api_key: Option<String>,
     pub deepseek_api_key: Option<String>,
     pub lm_studio_url: String,
+    pub custom_api_providers: Vec<CustomApiProviderConfig>,
 }
 
 impl Default for AiSettings {
@@ -45,6 +48,7 @@ impl Default for AiSettings {
             openai_api_key: None,
             deepseek_api_key: None,
             lm_studio_url: "http://localhost:1234".to_string(),
+            custom_api_providers: Vec::new(),
         }
     }
 }
@@ -214,13 +218,8 @@ pub async fn update_ai_settings(settings: AiSettings) -> Result<(), String> {
     let mut service = AI_SERVICE.lock();
 
     // 设置提供者类型
-    let provider_type = match settings.provider.as_str() {
-        "doubao" => AiProviderType::Doubao,
-        "openai" => AiProviderType::OpenAi,
-        "deepseek" => AiProviderType::DeepSeek,
-        _ => AiProviderType::LmStudio,
-    };
-    service.set_provider(provider_type);
+    service.set_custom_api_providers(settings.custom_api_providers);
+    service.set_provider_from_key(settings.provider);
 
     // 设置 API Keys
     if let Some(key) = settings.doubao_api_key {
@@ -252,19 +251,13 @@ pub async fn update_ai_settings(settings: AiSettings) -> Result<(), String> {
 pub async fn get_ai_settings() -> Result<AiSettings, String> {
     let service = AI_SERVICE.lock();
 
-    let provider = match service.provider_type {
-        AiProviderType::Doubao => "doubao",
-        AiProviderType::OpenAi => "openai",
-        AiProviderType::DeepSeek => "deepseek",
-        AiProviderType::LmStudio => "lmstudio",
-    };
-
     Ok(AiSettings {
-        provider: provider.to_string(),
+        provider: service.provider_key(),
         doubao_api_key: service.doubao_api_key.clone(),
         openai_api_key: service.openai_api_key.clone(),
         deepseek_api_key: service.deepseek_api_key.clone(),
         lm_studio_url: service.lm_studio_url.clone(),
+        custom_api_providers: service.custom_api_providers.clone(),
     })
 }
 
@@ -325,6 +318,14 @@ pub async fn check_lm_studio() -> Result<bool, String> {
         guard.clone()
     };
     Ok(service.check_lm_studio().await)
+}
+
+#[tauri::command]
+pub async fn check_custom_api_provider(provider: CustomApiProviderConfig) -> Result<bool, String> {
+    CustomApiProvider::new(provider)
+        .is_available()
+        .await
+        .map_err(|e| format!("自定义 API 检测失败: {}", e))
 }
 
 // ========== 嵌入模型管理 ==========

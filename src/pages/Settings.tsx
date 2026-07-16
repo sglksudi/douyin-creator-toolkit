@@ -10,12 +10,20 @@ import { useTheme } from "@/hooks/useTheme";
 import {
   Folder, Brain, Globe, Check,
   Download, FolderOpen, Loader2, CheckCircle, AlertCircle,
-  Mic, Save, Eye, EyeOff, FileText, RefreshCw, Trash2, Copy
+  Mic, Save, Eye, EyeOff, FileText, RefreshCw, Trash2, Copy, Plus
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/stores/useAppStore";
+import {
+  createCustomApiProvider,
+  customApiProviderIdFromKey,
+  customApiProviderKey,
+  isCustomApiProviderKey,
+  normalizeCustomApiProvider,
+  type CustomApiProvider,
+} from "./settingsCustomApi";
 
-type AIProvider = "doubao" | "openai" | "deepseek" | "lmstudio";
+type BuiltInAIProvider = "doubao" | "openai" | "deepseek" | "lmstudio";
 
 interface AppSettings {
   default_export_path: string;
@@ -30,6 +38,7 @@ interface AppSettings {
   openai_api_key: string | null;
   deepseek_api_key: string | null;
   lm_studio_url: string;
+  custom_api_providers: CustomApiProvider[];
   request_interval: number;
   max_retries: number;
 }
@@ -125,7 +134,9 @@ export function Settings() {
   const [showDoubaoKey, setShowDoubaoKey] = useState(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showDeepseekKey, setShowDeepseekKey] = useState(false);
+  const [showCustomApiKeys, setShowCustomApiKeys] = useState<Record<string, boolean>>({});
   const [lmStudioStatus, setLmStudioStatus] = useState<"checking" | "running" | "stopped">("checking");
+  const [customApiStatus, setCustomApiStatus] = useState<Record<string, "idle" | "checking" | "running" | "stopped">>({});
 
   // 日志状态
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -191,16 +202,20 @@ export function Settings() {
     setSettingsLoading(true);
     try {
       const data = await invoke<AppSettings>("get_settings");
-      setSettings(data);
-      await detectGpu(data);
+      const loadedSettings = {
+        ...data,
+        custom_api_providers: data.custom_api_providers ?? [],
+      };
+      setSettings(loadedSettings);
+      await detectGpu(loadedSettings);
       // Synchronize with global Zustand store for other components to access
       updateStoreSettings({
-        defaultExportPath: data.default_export_path,
-        gpuEnabled: data.gpu_enabled,
-        aiProvider: data.ai_provider,
-        lmStudioUrl: data.lm_studio_url,
-        requestInterval: data.request_interval,
-        maxRetries: data.max_retries,
+        defaultExportPath: loadedSettings.default_export_path,
+        gpuEnabled: loadedSettings.gpu_enabled,
+        aiProvider: loadedSettings.ai_provider,
+        lmStudioUrl: loadedSettings.lm_studio_url,
+        requestInterval: loadedSettings.request_interval,
+        maxRetries: loadedSettings.max_retries,
       });
 
       applyTheme("light"); // Force light mode
@@ -216,16 +231,33 @@ export function Settings() {
     if (!settings) return;
     setSettingsSaving(true);
     try {
-      await invoke("save_settings", { settings });
+      const normalizedSettings = {
+        ...settings,
+        custom_api_providers: settings.custom_api_providers.map(normalizeCustomApiProvider),
+      };
+      const invalidCustomProvider = normalizedSettings.custom_api_providers.find(
+        (provider) => !provider.name || !provider.base_url || !provider.model
+      );
+      if (invalidCustomProvider) {
+        toast({
+          title: "自定义 API 未填写完整",
+          description: "请填写名称、Base URL 和模型名，或删除未完成的自定义 API。",
+          variant: "error",
+        });
+        return;
+      }
+
+      await invoke("save_settings", { settings: normalizedSettings });
+      setSettings(normalizedSettings);
 
       // Synchronize updates to global store
       updateStoreSettings({
-        defaultExportPath: settings.default_export_path,
-        gpuEnabled: settings.gpu_enabled,
-        aiProvider: settings.ai_provider,
-        lmStudioUrl: settings.lm_studio_url,
-        requestInterval: settings.request_interval,
-        maxRetries: settings.max_retries,
+        defaultExportPath: normalizedSettings.default_export_path,
+        gpuEnabled: normalizedSettings.gpu_enabled,
+        aiProvider: normalizedSettings.ai_provider,
+        lmStudioUrl: normalizedSettings.lm_studio_url,
+        requestInterval: normalizedSettings.request_interval,
+        maxRetries: normalizedSettings.max_retries,
       });
 
       toast({ title: "保存成功", description: "设置已更新" });
@@ -237,9 +269,7 @@ export function Settings() {
   };
 
   const updateSetting = <K extends keyof AppSettings>(key: K, value: AppSettings[K]) => {
-    if (!settings) return;
-    const newSettings = { ...settings, [key]: value };
-    setSettings(newSettings);
+    setSettings((current) => current ? { ...current, [key]: value } : current);
   };
 
   const checkLmStudioStatus = async () => {
@@ -249,6 +279,89 @@ export function Settings() {
       setLmStudioStatus(isRunning ? "running" : "stopped");
     } catch {
       setLmStudioStatus("stopped");
+    }
+  };
+
+  const addCustomApiProvider = () => {
+    const provider = createCustomApiProvider();
+    setSettings((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        ai_provider: customApiProviderKey(provider),
+        custom_api_providers: [...current.custom_api_providers, provider],
+      };
+    });
+  };
+
+  const updateCustomApiProvider = (
+    providerId: string,
+    patch: Partial<Omit<CustomApiProvider, "id">>
+  ) => {
+    setSettings((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        custom_api_providers: current.custom_api_providers.map((provider) =>
+          provider.id === providerId ? { ...provider, ...patch } : provider
+        ),
+      };
+    });
+  };
+
+  const removeCustomApiProvider = async (providerId: string) => {
+    const answer = await ask("确定删除这个自定义 API 吗？", {
+      title: "删除自定义 API",
+      kind: "warning",
+      okLabel: "删除",
+      cancelLabel: "取消",
+    });
+
+    if (!answer) return;
+
+    setSettings((current) => {
+      if (!current) return current;
+      const nextProviders = current.custom_api_providers.filter((provider) => provider.id !== providerId);
+      const currentCustomId = customApiProviderIdFromKey(current.ai_provider);
+      const nextProviderKey =
+        currentCustomId === providerId
+          ? nextProviders[0]
+            ? customApiProviderKey(nextProviders[0])
+            : "lmstudio"
+          : current.ai_provider;
+
+      return {
+        ...current,
+        ai_provider: nextProviderKey,
+        custom_api_providers: nextProviders,
+      };
+    });
+  };
+
+  const toggleCustomApiKeyVisibility = (providerId: string) => {
+    setShowCustomApiKeys((current) => ({
+      ...current,
+      [providerId]: !current[providerId],
+    }));
+  };
+
+  const checkCustomApiProvider = async (provider: CustomApiProvider) => {
+    const normalized = normalizeCustomApiProvider(provider);
+    if (!normalized.base_url) {
+      toast({ title: "缺少 Base URL", description: "请先填写自定义 API 的 Base URL。", variant: "error" });
+      return;
+    }
+
+    setCustomApiStatus((current) => ({ ...current, [provider.id]: "checking" }));
+    try {
+      const isRunning = await invoke<boolean>("check_custom_api_provider", { provider: normalized });
+      setCustomApiStatus((current) => ({
+        ...current,
+        [provider.id]: isRunning ? "running" : "stopped",
+      }));
+    } catch (e) {
+      setCustomApiStatus((current) => ({ ...current, [provider.id]: "stopped" }));
+      toast({ title: "自定义 API 检测失败", description: String(e), variant: "error" });
     }
   };
 
@@ -505,6 +618,10 @@ export function Settings() {
     );
   }
 
+  const selectedCustomApiId = customApiProviderIdFromKey(settings.ai_provider);
+  const selectedCustomApiProvider = selectedCustomApiId
+    ? settings.custom_api_providers.find((provider) => provider.id === selectedCustomApiId) ?? null
+    : null;
 
   return (
     <div className="max-w-3xl mx-auto space-y-8">
@@ -949,10 +1066,10 @@ export function Settings() {
             <label className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 mb-3 block">服务商</label>
             <div className="space-y-2">
               {[
-                { value: "doubao" as AIProvider, label: "豆包", desc: "字节跳动 AI 服务" },
-                { value: "openai" as AIProvider, label: "ChatGPT", desc: "OpenAI GPT 模型" },
-                { value: "deepseek" as AIProvider, label: "DeepSeek", desc: "深度求索 AI 服务" },
-                { value: "lmstudio" as AIProvider, label: "LM Studio", desc: "本地大模型服务" },
+                { value: "doubao" as BuiltInAIProvider, label: "豆包", desc: "字节跳动 AI 服务" },
+                { value: "openai" as BuiltInAIProvider, label: "ChatGPT", desc: "OpenAI GPT 模型" },
+                { value: "deepseek" as BuiltInAIProvider, label: "DeepSeek", desc: "深度求索 AI 服务" },
+                { value: "lmstudio" as BuiltInAIProvider, label: "LM Studio", desc: "本地大模型服务" },
               ].map((item) => (
                 <button
                   key={item.value}
@@ -975,6 +1092,65 @@ export function Settings() {
                   )}
                 </button>
               ))}
+              {settings.custom_api_providers.length > 0 && (
+                <div className="pt-2 mt-2 border-t border-zinc-100 dark:border-zinc-800/70 space-y-2">
+                  <p className="text-[12px] font-medium text-zinc-500 dark:text-zinc-400">自定义 API</p>
+                  {settings.custom_api_providers.map((provider) => {
+                    const providerKey = customApiProviderKey(provider);
+                    const isSelected = settings.ai_provider === providerKey;
+
+                    return (
+                      <div
+                        key={provider.id}
+                        className={cn(
+                          "flex items-stretch gap-2 rounded-xl border p-1 transition-all duration-200",
+                          isSelected
+                            ? "bg-purple-50 dark:bg-purple-900/20 border-purple-200 dark:border-purple-800"
+                            : "bg-zinc-50 dark:bg-zinc-800/50 border-transparent hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        )}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => updateSetting("ai_provider", providerKey)}
+                          className="flex-1 min-w-0 px-2 py-2 text-left"
+                        >
+                          <p className={cn(
+                            "font-medium text-[14px] truncate",
+                            isSelected ? "text-purple-600 dark:text-purple-400" : "text-zinc-700 dark:text-zinc-300"
+                          )}>
+                            {provider.name || "未命名自定义 API"}
+                          </p>
+                          <p className="text-[12px] text-zinc-400 mt-0.5 truncate">
+                            {provider.model || "未设置模型"} · {provider.base_url || "未设置 Base URL"}
+                          </p>
+                        </button>
+                        {isSelected && (
+                          <div className="w-5 h-5 rounded-full bg-purple-500 flex items-center justify-center self-center">
+                            <Check className="w-3 h-3 text-white" />
+                          </div>
+                        )}
+                        <button
+                          type="button"
+                          title="删除自定义 API"
+                          onClick={() => removeCustomApiProvider(provider.id)}
+                          className="w-9 h-9 rounded-lg self-center flex items-center justify-center text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full rounded-xl justify-center"
+                onClick={addCustomApiProvider}
+              >
+                <Plus className="w-4 h-4 mr-1.5" />
+                新增自定义 API
+              </Button>
             </div>
           </div>
 
@@ -1029,6 +1205,97 @@ export function Settings() {
                 </button>
               </div>
               <p className="text-[12px] text-zinc-400 mt-2">从 <a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener noreferrer" className="text-purple-500 hover:underline">DeepSeek 控制台</a> 获取 API Key</p>
+            </div>
+          )}
+
+          {isCustomApiProviderKey(settings.ai_provider) && selectedCustomApiProvider && (
+            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800/50 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 mb-2.5 block">名称</label>
+                  <Input
+                    placeholder="例如：硅基流动"
+                    value={selectedCustomApiProvider.name}
+                    onChange={(e) => updateCustomApiProvider(selectedCustomApiProvider.id, { name: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 mb-2.5 block">模型</label>
+                  <Input
+                    placeholder="例如：deepseek-chat"
+                    value={selectedCustomApiProvider.model}
+                    onChange={(e) => updateCustomApiProvider(selectedCustomApiProvider.id, { model: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 mb-2.5 block">Base URL</label>
+                <Input
+                  placeholder="https://api.example.com/v1"
+                  value={selectedCustomApiProvider.base_url}
+                  onChange={(e) => updateCustomApiProvider(selectedCustomApiProvider.id, { base_url: e.target.value })}
+                />
+              </div>
+
+              <div>
+                <label className="text-[13px] font-medium text-zinc-500 dark:text-zinc-400 mb-2.5 block">API Key</label>
+                <div className="relative">
+                  <Input
+                    type={showCustomApiKeys[selectedCustomApiProvider.id] ? "text" : "password"}
+                    placeholder="可留空，适用于本地或内网兼容服务"
+                    value={selectedCustomApiProvider.api_key || ""}
+                    onChange={(e) => updateCustomApiProvider(selectedCustomApiProvider.id, { api_key: e.target.value || null })}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => toggleCustomApiKeyVisibility(selectedCustomApiProvider.id)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+                  >
+                    {showCustomApiKeys[selectedCustomApiProvider.id] ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="rounded-xl"
+                  disabled={customApiStatus[selectedCustomApiProvider.id] === "checking"}
+                  onClick={() => checkCustomApiProvider(selectedCustomApiProvider)}
+                >
+                  {customApiStatus[selectedCustomApiProvider.id] === "checking" ? (
+                    <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-4 h-4 mr-1.5" />
+                  )}
+                  检测
+                </Button>
+                {customApiStatus[selectedCustomApiProvider.id] === "running" && (
+                  <span className="inline-flex items-center gap-1.5 text-[12px] text-emerald-500">
+                    <CheckCircle className="w-3 h-3" />
+                    自定义 API 可用
+                  </span>
+                )}
+                {customApiStatus[selectedCustomApiProvider.id] === "stopped" && (
+                  <span className="inline-flex items-center gap-1.5 text-[12px] text-amber-500">
+                    <AlertCircle className="w-3 h-3" />
+                    未检测到可用服务
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
+
+          {isCustomApiProviderKey(settings.ai_provider) && !selectedCustomApiProvider && (
+            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800/50">
+              <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/30 flex gap-2.5">
+                <AlertCircle className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                <p className="text-[12px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                  当前选择的自定义 API 已不存在，请重新选择服务商。
+                </p>
+              </div>
             </div>
           )}
 

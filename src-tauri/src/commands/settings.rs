@@ -1,5 +1,6 @@
 // 设置相关命令
 
+use crate::ai::service::CustomApiProviderConfig;
 use crate::data::{get_default_db_path, AppConfig, ConfigManager, Database};
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
@@ -56,19 +57,13 @@ pub fn init_data_layer() -> Result<(), String> {
 
 /// 同步恢复 AI 设置 (供 init_data_layer 调用)
 fn restore_ai_settings_sync(config: crate::data::AppConfig) {
-    use crate::ai::service::AiProviderType;
     use crate::commands::ai::AI_SERVICE;
 
     let mut service = AI_SERVICE.lock();
 
     // 设置提供者类型
-    let provider_type = match config.ai_provider.as_str() {
-        "doubao" => AiProviderType::Doubao,
-        "openai" => AiProviderType::OpenAi,
-        "deepseek" => AiProviderType::DeepSeek,
-        _ => AiProviderType::LmStudio,
-    };
-    service.set_provider(provider_type);
+    service.set_custom_api_providers(config.custom_api_providers);
+    service.set_provider_from_key(config.ai_provider);
 
     // 设置 API Keys
     if let Some(key) = config.doubao_api_key {
@@ -123,6 +118,7 @@ pub struct AppSettings {
     pub openai_api_key: Option<String>,
     pub deepseek_api_key: Option<String>,
     pub lm_studio_url: String,
+    pub custom_api_providers: Vec<CustomApiProviderConfig>,
 
     // 网络设置
     pub request_interval: u64,
@@ -144,6 +140,7 @@ impl Default for AppSettings {
             openai_api_key: None,
             deepseek_api_key: None,
             lm_studio_url: "http://localhost:1234".to_string(),
+            custom_api_providers: Vec::new(),
             request_interval: 1000,
             max_retries: 3,
         }
@@ -165,6 +162,7 @@ impl From<AppConfig> for AppSettings {
             openai_api_key: config.openai_api_key,
             deepseek_api_key: config.deepseek_api_key,
             lm_studio_url: config.lm_studio_url,
+            custom_api_providers: config.custom_api_providers,
             request_interval: config.request_interval,
             max_retries: config.max_retries,
         }
@@ -186,6 +184,7 @@ impl From<AppSettings> for AppConfig {
             openai_api_key: settings.openai_api_key,
             deepseek_api_key: settings.deepseek_api_key,
             lm_studio_url: settings.lm_studio_url,
+            custom_api_providers: settings.custom_api_providers,
             request_interval: settings.request_interval,
             max_retries: settings.max_retries,
         }
@@ -221,6 +220,7 @@ pub async fn save_settings(settings: AppSettings) -> Result<(), String> {
         openai_api_key: settings.openai_api_key,
         deepseek_api_key: settings.deepseek_api_key,
         lm_studio_url: settings.lm_studio_url,
+        custom_api_providers: settings.custom_api_providers,
     };
     crate::commands::ai::update_ai_settings(ai_settings).await?;
 

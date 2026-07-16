@@ -76,6 +76,15 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CustomApiProviderConfig {
+    pub id: String,
+    pub name: String,
+    pub base_url: String,
+    pub model: String,
+    pub api_key: Option<String>,
+}
+
 // ... (Existing structs)
 
 // ... Update all providers to include `chat` method ...
@@ -152,6 +161,10 @@ impl AiService {
             }
             AiProviderType::LmStudio => {
                 let provider = LmStudioProvider::new(self.lm_studio_url.clone());
+                provider.chat(messages).await
+            }
+            AiProviderType::Custom => {
+                let provider = CustomApiProvider::new(self.selected_custom_api_provider()?);
                 provider.chat(messages).await
             }
         }
@@ -529,6 +542,115 @@ impl LmStudioProvider {
 }
 
 /// 解析 AI 返回的分析结果
+pub struct CustomApiProvider {
+    client: Client,
+    config: CustomApiProviderConfig,
+}
+
+impl CustomApiProvider {
+    pub fn new(config: CustomApiProviderConfig) -> Self {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap_or_else(|_| Client::new());
+
+        Self { client, config }
+    }
+
+    pub fn chat_completions_url(&self) -> String {
+        let base_url = self.config.base_url.trim().trim_end_matches('/');
+        if base_url.ends_with("/chat/completions") {
+            base_url.to_string()
+        } else {
+            format!("{}/chat/completions", base_url)
+        }
+    }
+
+    pub fn models_url(&self) -> String {
+        let chat_url = self.chat_completions_url();
+        if let Some(root) = chat_url.strip_suffix("/chat/completions") {
+            format!("{}/models", root.trim_end_matches('/'))
+        } else {
+            format!("{}/models", chat_url.trim_end_matches('/'))
+        }
+    }
+
+    fn with_auth(&self, request: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self
+            .config
+            .api_key
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            Some(api_key) => request.header("Authorization", format!("Bearer {}", api_key)),
+            None => request,
+        }
+    }
+
+    pub async fn is_available(&self) -> Result<bool, AiError> {
+        let request = self
+            .client
+            .get(self.models_url())
+            .header("Content-Type", "application/json")
+            .timeout(std::time::Duration::from_secs(10));
+        let response = self.with_auth(request).send().await?;
+        Ok(response.status().is_success())
+    }
+
+    pub async fn analyze(&self, content: &str, context: &str) -> Result<AnalysisResult, AiError> {
+        let prompt = format!("{}{}\n\n参考知识：\n{}", ANALYSIS_PROMPT, content, context);
+
+        let response = self
+            .chat(vec![ChatMessage {
+                role: "user".to_string(),
+                content: prompt,
+            }])
+            .await?;
+
+        parse_analysis_result(&response)
+    }
+
+    pub async fn chat(&self, messages: Vec<ChatMessage>) -> Result<String, AiError> {
+        let request = ChatRequest {
+            model: self.config.model.clone(),
+            messages,
+            temperature: 0.7,
+        };
+
+        let request_builder = self
+            .client
+            .post(self.chat_completions_url())
+            .header("Content-Type", "application/json")
+            .timeout(std::time::Duration::from_secs(120))
+            .json(&request);
+        let response = self.with_auth(request_builder).send().await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            if status.as_u16() == 401 {
+                return Err(AiError::InvalidApiKey);
+            }
+            return Err(AiError::ApiCallFailed(format!(
+                "状态码: {}, 响应: {}",
+                status, text
+            )));
+        }
+
+        let chat_response: ChatResponse = response
+            .json()
+            .await
+            .map_err(|e| AiError::ParseError(e.to_string()))?;
+
+        chat_response
+            .choices
+            .first()
+            .map(|c| c.message.content.clone())
+            .ok_or_else(|| AiError::ParseError("empty response".to_string()))
+    }
+}
+
 fn parse_analysis_result(content: &str) -> Result<AnalysisResult, AiError> {
     // 尝试从响应中提取 JSON
     let json_str = extract_json(content);
@@ -627,6 +749,52 @@ fn extract_json(content: &str) -> String {
         }
     }
     content.to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn custom_config(base_url: &str) -> CustomApiProviderConfig {
+        CustomApiProviderConfig {
+            id: "silicon-flow".to_string(),
+            name: "Silicon Flow".to_string(),
+            base_url: base_url.to_string(),
+            model: "Qwen/Qwen3-235B-A22B".to_string(),
+            api_key: Some("sk-test".to_string()),
+        }
+    }
+
+    #[test]
+    fn custom_provider_appends_chat_completions_to_base_url() {
+        let provider = CustomApiProvider::new(custom_config("https://api.siliconflow.cn/v1"));
+
+        assert_eq!(
+            provider.chat_completions_url(),
+            "https://api.siliconflow.cn/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn custom_provider_keeps_full_chat_completions_url() {
+        let provider = CustomApiProvider::new(custom_config(
+            "https://gateway.example.com/openai/v1/chat/completions",
+        ));
+
+        assert_eq!(
+            provider.chat_completions_url(),
+            "https://gateway.example.com/openai/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn ai_service_round_trips_selected_custom_provider_key() {
+        let mut service = AiService::default();
+        service.set_custom_api_providers(vec![custom_config("https://api.siliconflow.cn/v1")]);
+        service.set_provider_from_key("custom:silicon-flow".to_string());
+
+        assert_eq!(service.provider_key(), "custom:silicon-flow");
+    }
 }
 
 /// DeepSeek API 提供者
@@ -743,10 +911,12 @@ impl DeepSeekProvider {
 #[derive(Clone)]
 pub struct AiService {
     pub provider_type: AiProviderType,
+    pub selected_custom_api_id: Option<String>,
     pub doubao_api_key: Option<String>,
     pub openai_api_key: Option<String>,
     pub deepseek_api_key: Option<String>,
     pub lm_studio_url: String,
+    pub custom_api_providers: Vec<CustomApiProviderConfig>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -755,16 +925,19 @@ pub enum AiProviderType {
     OpenAi,
     DeepSeek,
     LmStudio,
+    Custom,
 }
 
 impl Default for AiService {
     fn default() -> Self {
         Self {
             provider_type: AiProviderType::LmStudio,
+            selected_custom_api_id: None,
             doubao_api_key: None,
             openai_api_key: None,
             deepseek_api_key: None,
             lm_studio_url: "http://localhost:1234".to_string(),
+            custom_api_providers: Vec::new(),
         }
     }
 }
@@ -776,6 +949,58 @@ impl AiService {
 
     pub fn set_provider(&mut self, provider_type: AiProviderType) {
         self.provider_type = provider_type;
+    }
+
+    pub fn set_provider_from_key(&mut self, provider_key: String) {
+        if let Some(custom_id) = provider_key.strip_prefix("custom:") {
+            self.provider_type = AiProviderType::Custom;
+            self.selected_custom_api_id = Some(custom_id.to_string());
+            return;
+        }
+
+        self.provider_type = match provider_key.as_str() {
+            "doubao" => AiProviderType::Doubao,
+            "openai" => AiProviderType::OpenAi,
+            "deepseek" => AiProviderType::DeepSeek,
+            "custom" => AiProviderType::Custom,
+            _ => AiProviderType::LmStudio,
+        };
+    }
+
+    pub fn provider_key(&self) -> String {
+        match self.provider_type {
+            AiProviderType::Doubao => "doubao".to_string(),
+            AiProviderType::OpenAi => "openai".to_string(),
+            AiProviderType::DeepSeek => "deepseek".to_string(),
+            AiProviderType::LmStudio => "lmstudio".to_string(),
+            AiProviderType::Custom => self
+                .selected_custom_api_id
+                .as_ref()
+                .map(|id| format!("custom:{}", id))
+                .unwrap_or_else(|| "custom".to_string()),
+        }
+    }
+
+    pub fn set_custom_api_providers(&mut self, providers: Vec<CustomApiProviderConfig>) {
+        self.custom_api_providers = providers;
+    }
+
+    fn selected_custom_api_provider(&self) -> Result<CustomApiProviderConfig, AiError> {
+        if let Some(selected_id) = self.selected_custom_api_id.as_deref() {
+            return self
+                .custom_api_providers
+                .iter()
+                .find(|provider| provider.id == selected_id)
+                .cloned()
+                .ok_or_else(|| {
+                    AiError::ServiceUnavailable("自定义 API 未配置或已删除".to_string())
+                });
+        }
+
+        self.custom_api_providers
+            .first()
+            .cloned()
+            .ok_or_else(|| AiError::ServiceUnavailable("自定义 API 未配置".to_string()))
     }
 
     pub fn set_doubao_key(&mut self, api_key: String) {
@@ -816,6 +1041,10 @@ impl AiService {
             }
             AiProviderType::LmStudio => {
                 let provider = LmStudioProvider::new(self.lm_studio_url.clone());
+                provider.analyze(content, context).await
+            }
+            AiProviderType::Custom => {
+                let provider = CustomApiProvider::new(self.selected_custom_api_provider()?);
                 provider.analyze(content, context).await
             }
         }

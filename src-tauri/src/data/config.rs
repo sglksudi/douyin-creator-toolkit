@@ -1,7 +1,8 @@
 // 配置管理模块
 
-use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+use crate::ai::service::CustomApiProviderConfig;
 use crate::data::database::{Database, DbError};
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -41,6 +42,7 @@ pub struct AppConfig {
     pub openai_api_key: Option<String>,
     pub deepseek_api_key: Option<String>,
     pub lm_studio_url: String,
+    pub custom_api_providers: Vec<CustomApiProviderConfig>,
 
     // 网络设置
     pub request_interval: u64,
@@ -62,6 +64,7 @@ impl Default for AppConfig {
             openai_api_key: None,
             deepseek_api_key: None,
             lm_studio_url: "http://localhost:1234".to_string(),
+            custom_api_providers: Vec::new(),
             request_interval: 1000,
             max_retries: 3,
         }
@@ -82,6 +85,7 @@ pub mod config_keys {
     pub const OPENAI_API_KEY: &str = "openai_api_key";
     pub const DEEPSEEK_API_KEY: &str = "deepseek_api_key";
     pub const LM_STUDIO_URL: &str = "lm_studio_url";
+    pub const CUSTOM_API_PROVIDERS: &str = "custom_api_providers";
     pub const REQUEST_INTERVAL: &str = "request_interval";
     pub const MAX_RETRIES: &str = "max_retries";
 }
@@ -91,7 +95,10 @@ const SECRET_VALUE_PREFIX: &str = "dpapi:";
 fn is_secret_key(key: &str) -> bool {
     matches!(
         key,
-        config_keys::DOUBAO_API_KEY | config_keys::OPENAI_API_KEY | config_keys::DEEPSEEK_API_KEY
+        config_keys::DOUBAO_API_KEY
+            | config_keys::OPENAI_API_KEY
+            | config_keys::DEEPSEEK_API_KEY
+            | config_keys::CUSTOM_API_PROVIDERS
     )
 }
 
@@ -104,7 +111,11 @@ fn serialize_secret_value(value: &str) -> Result<String, ConfigError> {
     {
         let encrypted = windows_dpapi::encrypt_data(value.as_bytes(), windows_dpapi::Scope::User)
             .map_err(|e| ConfigError::SaveFailed(format!("API Key 加密失败: {}", e)))?;
-        return Ok(format!("{}{}", SECRET_VALUE_PREFIX, BASE64.encode(encrypted)));
+        return Ok(format!(
+            "{}{}",
+            SECRET_VALUE_PREFIX,
+            BASE64.encode(encrypted)
+        ));
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -221,6 +232,14 @@ impl ConfigManager {
             config.lm_studio_url = value;
         }
 
+        if let Some(value) = self.db.get_config(config_keys::CUSTOM_API_PROVIDERS)? {
+            let json = deserialize_secret_value(value)?.unwrap_or_default();
+            if !json.is_empty() {
+                config.custom_api_providers = serde_json::from_str(&json)
+                    .map_err(|e| ConfigError::ParseFailed(e.to_string()))?;
+            }
+        }
+
         if let Some(value) = self.db.get_config(config_keys::REQUEST_INTERVAL)? {
             config.request_interval = value.parse().unwrap_or(1000);
         }
@@ -236,10 +255,16 @@ impl ConfigManager {
     pub fn save(&self) -> Result<(), ConfigError> {
         let config = self.config.read();
 
-        self.persist_value(config_keys::DEFAULT_EXPORT_PATH, &config.default_export_path)?;
+        self.persist_value(
+            config_keys::DEFAULT_EXPORT_PATH,
+            &config.default_export_path,
+        )?;
         self.persist_value(config_keys::THEME, &config.theme)?;
         self.persist_value(config_keys::GPU_ENABLED, &config.gpu_enabled.to_string())?;
-        self.persist_value(config_keys::GPU_DEVICE_ID, &config.gpu_device_id.to_string())?;
+        self.persist_value(
+            config_keys::GPU_DEVICE_ID,
+            &config.gpu_device_id.to_string(),
+        )?;
         self.persist_value(config_keys::GPU_THREADS, &config.gpu_threads.to_string())?;
         self.persist_value(
             config_keys::GPU_MEMORY_LIMIT,
@@ -260,6 +285,9 @@ impl ConfigManager {
             config.deepseek_api_key.as_deref().unwrap_or(""),
         )?;
         self.persist_value(config_keys::LM_STUDIO_URL, &config.lm_studio_url)?;
+        let custom_api_providers = serde_json::to_string(&config.custom_api_providers)
+            .map_err(|e| ConfigError::SerializationError(e.to_string()))?;
+        self.persist_value(config_keys::CUSTOM_API_PROVIDERS, &custom_api_providers)?;
         self.persist_value(
             config_keys::REQUEST_INTERVAL,
             &config.request_interval.to_string(),
@@ -299,6 +327,9 @@ impl ConfigManager {
             config_keys::OPENAI_API_KEY => config.openai_api_key.clone(),
             config_keys::DEEPSEEK_API_KEY => config.deepseek_api_key.clone(),
             config_keys::LM_STUDIO_URL => Some(config.lm_studio_url.clone()),
+            config_keys::CUSTOM_API_PROVIDERS => {
+                serde_json::to_string(&config.custom_api_providers).ok()
+            }
             config_keys::REQUEST_INTERVAL => Some(config.request_interval.to_string()),
             config_keys::MAX_RETRIES => Some(config.max_retries.to_string()),
             _ => None,
@@ -360,6 +391,14 @@ impl ConfigManager {
                     };
                 }
                 config_keys::LM_STUDIO_URL => config.lm_studio_url = value.to_string(),
+                config_keys::CUSTOM_API_PROVIDERS => {
+                    config.custom_api_providers = if value.is_empty() {
+                        Vec::new()
+                    } else {
+                        serde_json::from_str(value)
+                            .map_err(|e| ConfigError::ParseFailed(e.to_string()))?
+                    };
+                }
                 config_keys::REQUEST_INTERVAL => {
                     config.request_interval = value.parse().map_err(|_| {
                         ConfigError::ParseFailed(format!("无法解析数字: {}", value))
@@ -530,5 +569,37 @@ mod tests {
 
         let config = manager.get();
         assert_eq!(config.theme, "system");
+    }
+
+    #[test]
+    fn test_custom_api_providers_round_trip() {
+        let db = create_test_db();
+        let manager = ConfigManager::new(db.clone()).unwrap();
+
+        let mut config = AppConfig::default();
+        config.ai_provider = "custom:silicon-flow".to_string();
+        config.custom_api_providers = vec![CustomApiProviderConfig {
+            id: "silicon-flow".to_string(),
+            name: "Silicon Flow".to_string(),
+            base_url: "https://api.siliconflow.cn/v1".to_string(),
+            model: "Qwen/Qwen3-235B-A22B".to_string(),
+            api_key: Some("sk-test".to_string()),
+        }];
+
+        manager.update(config).unwrap();
+        let reloaded = ConfigManager::new(db).unwrap();
+        let loaded = reloaded.get();
+
+        assert_eq!(loaded.ai_provider, "custom:silicon-flow");
+        assert_eq!(loaded.custom_api_providers.len(), 1);
+        assert_eq!(loaded.custom_api_providers[0].id, "silicon-flow");
+        assert_eq!(
+            loaded.custom_api_providers[0].base_url,
+            "https://api.siliconflow.cn/v1"
+        );
+        assert_eq!(
+            loaded.custom_api_providers[0].api_key.as_deref(),
+            Some("sk-test")
+        );
     }
 }
