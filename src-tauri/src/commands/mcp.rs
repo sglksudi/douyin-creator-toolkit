@@ -35,6 +35,12 @@ pub struct BatchParseStats {
     pub results: Vec<LinkParseResult>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractDouyinContentResult {
+    pub transcript: String,
+    pub video_path: String,
+}
+
 /// 更新 MCP 配置
 #[tauri::command]
 pub fn update_mcp_config(
@@ -252,7 +258,7 @@ pub async fn extract_douyin_content(
     app: AppHandle,
     url: String,
     filename: String,
-) -> Result<String, String> {
+) -> Result<ExtractDouyinContentResult, String> {
     eprintln!("[Extract] 开始处理: {}", filename);
     let processor = VideoProcessor::new().map_err(|e| e.to_string())?;
 
@@ -317,5 +323,8 @@ pub async fn extract_douyin_content(
     // let _ = std::fs::remove_file(audio_result.output_path);
 
     eprintln!("[Extract] 完成! 文案长度: {}", result.text.len());
-    Ok(result.text)
+    Ok(ExtractDouyinContentResult {
+        transcript: result.text,
+        video_path: video_path.to_string_lossy().to_string(),
+    })
 }

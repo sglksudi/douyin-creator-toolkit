@@ -27,9 +27,28 @@ export interface LinkItem {
   status: "pending" | "processing" | "success" | "failed";
   videoInfo?: DouyinVideoInfo;
   transcript?: string;
+  localVideoPath?: string;
   error?: string;
   retryCount: number;
   expanded?: boolean;
+  useFrameAnalysis?: boolean;
+  deepAnalysis?: DeepAnalysisState;
+}
+
+export type DeepAnalysisProfile = "economy" | "balanced" | "precise";
+
+export interface DeepAnalysisState {
+  status: "idle" | "running" | "completed" | "failed";
+  taskId?: string;
+  progress?: number;
+  resultPath?: string;
+  error?: string;
+  useFrameAnalysis?: boolean;
+}
+
+interface ExtractDouyinContentResult {
+  transcript: string;
+  video_path: string;
 }
 
 export interface ParseProgressEvent {
@@ -38,6 +57,30 @@ export interface ParseProgressEvent {
   success: number;
   failed: number;
   current_link: string;
+}
+
+interface TaskProgressEvent {
+  task_id: string;
+  progress: number;
+  status: string;
+}
+
+interface TaskCompletedEvent {
+  task_id: string;
+  result?: string | null;
+}
+
+interface TaskFailedEvent {
+  task_id: string;
+  error: string;
+}
+
+interface TaskInfo {
+  id: string;
+  status: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+  progress: number;
+  result?: string | null;
+  error?: string | null;
 }
 
 export interface BatchParseStats {
@@ -72,10 +115,12 @@ interface DouyinLinkStore {
   removeLink: (id: string) => void;
   clearLinks: () => void;
   toggleExpanded: (id: string) => void;
+  setUseFrameAnalysis: (id: string, useFrameAnalysis: boolean) => void;
 
   // Processing
   parseAllLinks: () => Promise<BatchParseStats | null>;
   retryFailedLinks: () => Promise<void>;
+  startDeepAnalysis: (id: string, profile: DeepAnalysisProfile, useFrameAnalysis: boolean) => Promise<void>;
 
   // Health check
   checkServicesHealth: () => Promise<void>;
@@ -123,6 +168,7 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
       url,
       status: "pending" as const,
       retryCount: 0,
+      useFrameAnalysis: false,
     }));
 
     set({ links: newLinks, stats: null, progress: null });
@@ -140,6 +186,7 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
       url,
       status: "pending" as const,
       retryCount: 0,
+      useFrameAnalysis: false,
     }));
 
     set((state) => ({
@@ -162,6 +209,14 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
     set((state) => ({
       links: state.links.map((l) =>
         l.id === id ? { ...l, expanded: !l.expanded } : l
+      ),
+    }));
+  },
+
+  setUseFrameAnalysis: (id: string, useFrameAnalysis: boolean) => {
+    set((state) => ({
+      links: state.links.map((l) =>
+        l.id === id ? { ...l, useFrameAnalysis } : l
       ),
     }));
   },
@@ -234,7 +289,7 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
         if (!linkId || !parseResult.video_info) continue;
 
         try {
-          const transcript = await invoke<string>("extract_douyin_content", {
+          const content = await invoke<ExtractDouyinContentResult>("extract_douyin_content", {
             url: parseResult.video_info.video_url,
             filename: parseResult.video_info.title.slice(0, 30).replace(/[\\/:*?"<>|]/g, "_") || "video",
           });
@@ -242,7 +297,7 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
           set(state => ({
             links: state.links.map(l =>
               l.id === linkId
-                ? { ...l, transcript }
+                ? { ...l, transcript: content.transcript, localVideoPath: content.video_path }
                 : l
             )
           }));
@@ -288,6 +343,75 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
     await get().parseAllLinks();
   },
 
+  startDeepAnalysis: async (id: string, profile: DeepAnalysisProfile, useFrameAnalysis: boolean) => {
+    const { links } = get();
+    const link = links.find((l) => l.id === id);
+    if (!link || !link.transcript) return;
+
+    if (useFrameAnalysis && !link.localVideoPath) {
+      throw new Error("Frame evidence requires a cached local video. Re-extract the link transcript first.");
+    }
+
+    set((state) => ({
+      links: state.links.map((l) =>
+        l.id === id
+          ? {
+            ...l,
+            useFrameAnalysis,
+            deepAnalysis: { status: "running" as const, progress: 0, useFrameAnalysis },
+          }
+          : l
+      ),
+    }));
+
+    try {
+      const taskId = await invoke<string>("start_deep_video_analysis", {
+        request: {
+          source: useFrameAnalysis
+            ? {
+              downloaded_douyin_video: {
+                video_path: link.localVideoPath,
+                source_url: link.url,
+              },
+            }
+            : {
+              text_only: {
+                source_url: link.url,
+              },
+            },
+          task_id: link.id,
+          title: link.videoInfo?.title || link.url,
+          profile,
+          use_frame_analysis: useFrameAnalysis,
+          transcript: { text: link.transcript, segments: [] },
+          ocr_items: [],
+          reference_text: link.videoInfo
+            ? `Author: ${link.videoInfo.author}\nLikes: ${link.videoInfo.likes}\nComments: ${link.videoInfo.comments}\nShares: ${link.videoInfo.shares}`
+            : null,
+        },
+      });
+
+      set((state) => ({
+        links: state.links.map((l) =>
+          l.id === id
+            ? { ...l, deepAnalysis: { status: "running" as const, taskId, progress: 0, useFrameAnalysis } }
+            : l
+        ),
+      }));
+
+      void reconcileDeepAnalysisTask(id, taskId, useFrameAnalysis);
+    } catch (error) {
+      set((state) => ({
+        links: state.links.map((l) =>
+          l.id === id
+            ? { ...l, deepAnalysis: { status: "failed" as const, error: String(error), useFrameAnalysis } }
+            : l
+        ),
+      }));
+      throw error;
+    }
+  },
+
   checkServicesHealth: async () => {
     try {
       const [dyHealth, undoomHealth] = await Promise.all([
@@ -316,7 +440,7 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
   },
 
   setupProgressListener: async () => {
-    const unlisten = await listen<ParseProgressEvent>(
+    const unlistenParseProgress = await listen<ParseProgressEvent>(
       "mcp:parse-progress",
       (event) => {
         const progress = event.payload;
@@ -333,7 +457,70 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
       }
     );
 
-    return unlisten;
+    const unlistenTaskProgress = await listen<TaskProgressEvent>("task-progress", (event) => {
+      const progress = event.payload;
+
+      set((state) => ({
+        links: state.links.map((l) =>
+          l.deepAnalysis?.taskId === progress.task_id
+            ? {
+              ...l,
+              deepAnalysis: {
+                ...l.deepAnalysis,
+                status: progress.status === "completed" ? "completed" : "running",
+                progress: Math.round(progress.progress * 100),
+              },
+            }
+            : l
+        ),
+      }));
+    });
+
+    const unlistenTaskCompleted = await listen<TaskCompletedEvent>("task-completed", (event) => {
+      const completed = event.payload;
+
+      set((state) => ({
+        links: state.links.map((l) =>
+          l.deepAnalysis?.taskId === completed.task_id
+            ? {
+              ...l,
+              deepAnalysis: {
+                ...l.deepAnalysis,
+                status: "completed",
+                progress: 100,
+                resultPath: completed.result ?? undefined,
+              },
+            }
+            : l
+        ),
+      }));
+    });
+
+    const unlistenTaskFailed = await listen<TaskFailedEvent>("task-failed", (event) => {
+      const failed = event.payload;
+
+      set((state) => ({
+        links: state.links.map((l) =>
+          l.deepAnalysis?.taskId === failed.task_id
+            ? {
+              ...l,
+              deepAnalysis: {
+                ...l.deepAnalysis,
+                status: "failed",
+                error: failed.error,
+              },
+            }
+            : l
+        ),
+      }));
+    });
+
+    return () => {
+      unlistenParseProgress();
+      unlistenTaskProgress();
+      unlistenTaskCompleted();
+      unlistenTaskFailed();
+    };
   },
 
   getSuccessfulLinks: () => {
@@ -344,3 +531,34 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
     return get().links.filter((l) => l.status === "failed");
   },
 }));
+
+async function reconcileDeepAnalysisTask(
+  linkId: string,
+  taskId: string,
+  useFrameAnalysis: boolean
+) {
+  try {
+    const task = await invoke<TaskInfo | null>("get_task_info", { taskId });
+    if (!task || (task.status !== "completed" && task.status !== "failed")) return;
+
+    useDouyinLinkStore.setState((state) => ({
+      links: state.links.map((link) => {
+        if (link.id !== linkId || link.deepAnalysis?.taskId !== taskId) return link;
+
+        return {
+          ...link,
+          deepAnalysis: {
+            ...link.deepAnalysis,
+            status: task.status === "completed" ? "completed" : "failed",
+            progress: task.status === "completed" ? 100 : link.deepAnalysis.progress,
+            resultPath: task.result ?? link.deepAnalysis.resultPath,
+            error: task.error ?? link.deepAnalysis.error,
+            useFrameAnalysis,
+          },
+        };
+      }),
+    }));
+  } catch (error) {
+    console.warn("[DouyinLinkStore] Failed to reconcile deep analysis task:", error);
+  }
+}

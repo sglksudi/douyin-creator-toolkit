@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/input";
 import {
   Link,
@@ -20,6 +21,7 @@ import {
   Copy,
   ExternalLink,
   Brain,
+  Layers,
 } from "lucide-react";
 import { useDouyinLinkStore, LinkItem } from "@/stores/useDouyinLinkStore";
 import { useToast } from "@/hooks/useToast";
@@ -36,8 +38,35 @@ function LinkResultCard({
   onChat: (link: LinkItem) => void;
   onSendToAgent: (link: LinkItem) => void;
 }) {
-  const { toggleExpanded, removeLink } = useDouyinLinkStore();
+  const { toggleExpanded, removeLink, setUseFrameAnalysis, startDeepAnalysis } = useDouyinLinkStore();
   const { toast } = useToast();
+
+  const handleDeepAnalysis = async () => {
+    if (!link.transcript) {
+      toast({
+        title: "无法分析",
+        description: "请先等待视频文案提取完成",
+        variant: "warning",
+      });
+      return;
+    }
+
+    try {
+      await startDeepAnalysis(link.id, "balanced", Boolean(link.useFrameAnalysis));
+      toast({
+        title: "证据链分析已启动",
+        description: link.useFrameAnalysis
+          ? "画面证据已开启，将复用缓存视频抽取画面"
+          : "文案模式已启动，不会额外下载或抽帧",
+      });
+    } catch (error) {
+      toast({
+        title: "证据链分析失败",
+        description: String(error),
+        variant: "error",
+      });
+    }
+  };
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -222,6 +251,24 @@ function LinkResultCard({
                     <MessageCircle className="w-3 h-3 mr-1" />
                     AI 对话
                   </Button>
+                  <div className="flex h-6 items-center gap-1.5 rounded-md border border-teal-200 bg-white px-2 text-[12px] text-teal-700 dark:border-teal-800 dark:bg-zinc-900 dark:text-teal-300">
+                    <span>{link.useFrameAnalysis ? "画面证据" : "文案模式"}</span>
+                    <Switch
+                      checked={Boolean(link.useFrameAnalysis)}
+                      onCheckedChange={(checked) => setUseFrameAnalysis(link.id, checked)}
+                      aria-label="画面证据"
+                    />
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 text-[12px] text-teal-600 hover:text-teal-700 hover:bg-teal-50 dark:hover:bg-teal-900/10"
+                    onClick={handleDeepAnalysis}
+                    disabled={!link.transcript || link.deepAnalysis?.status === "running"}
+                  >
+                    <Layers className="w-3 h-3 mr-1" />
+                    证据链分析
+                  </Button>
                   <Button
                     size="sm"
                     variant="ghost"
@@ -234,9 +281,51 @@ function LinkResultCard({
                 </div>
               </div>
               {link.transcript ? (
-                <p className="text-[13px] text-zinc-600 dark:text-zinc-400 leading-relaxed whitespace-pre-wrap">
-                  {link.transcript}
-                </p>
+                <>
+                  <p className="text-[13px] text-zinc-600 dark:text-zinc-400 leading-relaxed whitespace-pre-wrap">
+                    {link.transcript}
+                  </p>
+                  {link.deepAnalysis && (
+                    <div className="mt-3 rounded-lg border border-teal-200/80 bg-teal-50/70 p-3 text-xs text-teal-800 shadow-sm dark:border-teal-900/80 dark:bg-teal-950/20 dark:text-teal-200">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Layers className="w-4 h-4 text-teal-600 dark:text-teal-300" />
+                        <span className="font-medium">证据链分析</span>
+                        <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-teal-700 dark:bg-teal-900/50 dark:text-teal-200">
+                          {link.deepAnalysis.status === "running"
+                            ? link.deepAnalysis.progress
+                              ? `分析中 ${link.deepAnalysis.progress}%`
+                              : "分析中"
+                            : link.deepAnalysis.status === "completed"
+                              ? "已完成"
+                              : link.deepAnalysis.status === "failed"
+                                ? "失败"
+                                : "未开始"}
+                        </span>
+                        <span className="rounded-full bg-white/80 px-2 py-0.5 text-[11px] text-teal-700 dark:bg-teal-900/50 dark:text-teal-200">
+                          {link.deepAnalysis.useFrameAnalysis ? "画面证据" : "文案模式"}
+                        </span>
+                      </div>
+                      {link.deepAnalysis.status === "running" && link.deepAnalysis.progress !== undefined && (
+                        <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-teal-100 dark:bg-teal-950">
+                          <div
+                            className="h-full rounded-full bg-teal-500 transition-all duration-300"
+                            style={{ width: `${link.deepAnalysis.progress}%` }}
+                          />
+                        </div>
+                      )}
+                      {link.deepAnalysis.resultPath && (
+                        <div className="mt-2 break-all text-teal-700/80 dark:text-teal-200/80">
+                          结果：{link.deepAnalysis.resultPath}
+                        </div>
+                      )}
+                      {link.deepAnalysis.error && (
+                        <div className="mt-2 break-all text-red-600 dark:text-red-400">
+                          {link.deepAnalysis.error}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </>
               ) : (
                 <div className="mt-2 flex items-center gap-2 text-[13px] text-zinc-400">
                   <Loader2 className="w-3 h-3 animate-spin" />

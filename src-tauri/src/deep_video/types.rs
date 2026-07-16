@@ -4,10 +4,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum DeepVideoSource {
-    LocalVideo { video_path: String },
+    LocalVideo {
+        video_path: String,
+    },
     DownloadedDouyinVideo {
         video_path: String,
         source_url: String,
+    },
+    TextOnly {
+        source_url: Option<String>,
     },
 }
 
@@ -17,6 +22,8 @@ pub struct DeepVideoAnalysisRequest {
     pub task_id: Option<String>,
     pub title: String,
     pub profile: AnalysisProfile,
+    #[serde(default)]
+    pub use_frame_analysis: bool,
     pub transcript: Option<TranscriptInput>,
     #[serde(default)]
     pub ocr_items: Vec<OcrInputItem>,
@@ -220,7 +227,7 @@ pub struct EvidenceItem {
 pub struct DeepVideoArtifacts {
     pub request_json: String,
     pub frame_result_json: String,
-    pub evidence_sheet_jpg: String,
+    pub evidence_sheet_jpg: Option<String>,
     pub candidate_segments_json: String,
     pub vision_result_json: Option<String>,
     pub evidence_timeline_json: String,
@@ -232,10 +239,10 @@ pub struct DeepVideoArtifacts {
 pub struct DeepVideoAnalysisResult {
     pub task_id: String,
     pub title: String,
-    pub source_video_path: String,
+    pub source_video_path: Option<String>,
     pub profile: AnalysisProfile,
     pub frames: Vec<EvidenceFrame>,
-    pub evidence_sheet: EvidenceSheet,
+    pub evidence_sheet: Option<EvidenceSheet>,
     pub candidates: Vec<CandidateSegment>,
     pub timeline: Vec<EvidenceItem>,
     pub report_markdown: String,
@@ -259,7 +266,10 @@ mod tests {
                 vision_passes: 1,
             }
         );
-        assert_eq!(AnalysisProfile::Balanced.normalized_options().max_frames, 24);
+        assert_eq!(
+            AnalysisProfile::Balanced.normalized_options().max_frames,
+            24
+        );
         assert_eq!(AnalysisProfile::Precise.normalized_options().max_frames, 48);
     }
 
@@ -299,5 +309,21 @@ mod tests {
         assert_eq!(frame.frame_id, "#003");
         assert_eq!(frame.index, 3);
         assert_eq!(frame.timestamp_seconds, Some(10.25));
+    }
+
+    #[test]
+    fn request_defaults_frame_analysis_to_disabled() {
+        let request: DeepVideoAnalysisRequest = serde_json::from_value(serde_json::json!({
+            "source": { "local_video": { "video_path": "sample.mp4" } },
+            "task_id": null,
+            "title": "sample.mp4",
+            "profile": "balanced",
+            "transcript": null,
+            "ocr_items": [],
+            "reference_text": null
+        }))
+        .unwrap();
+
+        assert!(!request.use_frame_analysis);
     }
 }

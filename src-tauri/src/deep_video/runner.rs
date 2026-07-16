@@ -18,27 +18,35 @@ pub async fn run_deep_video_analysis(
         .clone()
         .unwrap_or_else(|| format!("deep-video-{}", chrono::Utc::now().timestamp_millis()));
     let paths = create_artifact_paths(&task_id)?;
-    let video_path = source_video_path(&request.source);
-    if !video_path.exists() {
-        return Err(format!(
-            "Video source does not exist: {}",
-            video_path.display()
-        ));
-    }
-
-    let options = request.profile.normalized_options();
-    let frames = sample_interval_frames(&video_path, &paths.frames_dir, &options).await?;
-    let sheet = generate_contact_sheet(&frames, &paths.evidence_sheet_jpg)?;
     let candidates = mine_candidate_segments(
         request.transcript.as_ref(),
         &request.ocr_items,
         request.reference_text.as_deref(),
     );
+    let (frames, sheet) = if request.use_frame_analysis {
+        let video_path = source_video_path(&request.source)
+            .ok_or_else(|| "Frame evidence requires a video source".to_string())?;
+        if !video_path.exists() {
+            return Err(format!(
+                "Video source does not exist: {}",
+                video_path.display()
+            ));
+        }
+
+        let options = request.profile.normalized_options();
+        let frames = sample_interval_frames(&video_path, &paths.frames_dir, &options).await?;
+        let sheet = generate_contact_sheet(&frames, &paths.evidence_sheet_jpg)?;
+        (frames, Some(sheet))
+    } else {
+        (Vec::new(), None)
+    };
 
     let artifacts = DeepVideoArtifacts {
         request_json: paths.request_json.to_string_lossy().to_string(),
         frame_result_json: paths.frame_result_json.to_string_lossy().to_string(),
-        evidence_sheet_jpg: paths.evidence_sheet_jpg.to_string_lossy().to_string(),
+        evidence_sheet_jpg: request
+            .use_frame_analysis
+            .then(|| paths.evidence_sheet_jpg.to_string_lossy().to_string()),
         candidate_segments_json: paths.candidate_segments_json.to_string_lossy().to_string(),
         vision_result_json: None,
         evidence_timeline_json: paths.evidence_timeline_json.to_string_lossy().to_string(),
@@ -62,7 +70,7 @@ pub fn assemble_analysis_result(
     task_id: &str,
     request: &DeepVideoAnalysisRequest,
     frames: Vec<EvidenceFrame>,
-    evidence_sheet: EvidenceSheet,
+    evidence_sheet: Option<EvidenceSheet>,
     candidates: Vec<CandidateSegment>,
     artifacts: DeepVideoArtifacts,
 ) -> DeepVideoAnalysisResult {
@@ -72,13 +80,17 @@ pub fn assemble_analysis_result(
         &frames,
         &candidates,
     );
-    let report_markdown = build_markdown_report(&request.title, &timeline, &candidates);
+    let report_markdown = build_markdown_report(
+        &request.title,
+        &timeline,
+        &candidates,
+        evidence_sheet.is_some(),
+    );
     DeepVideoAnalysisResult {
         task_id: task_id.to_string(),
         title: request.title.clone(),
         source_video_path: source_video_path(&request.source)
-            .to_string_lossy()
-            .to_string(),
+            .map(|path| path.to_string_lossy().to_string()),
         profile: request.profile.clone(),
         frames,
         evidence_sheet,
@@ -89,10 +101,13 @@ pub fn assemble_analysis_result(
     }
 }
 
-fn source_video_path(source: &DeepVideoSource) -> PathBuf {
+fn source_video_path(source: &DeepVideoSource) -> Option<PathBuf> {
     match source {
-        DeepVideoSource::LocalVideo { video_path } => PathBuf::from(video_path),
-        DeepVideoSource::DownloadedDouyinVideo { video_path, .. } => PathBuf::from(video_path),
+        DeepVideoSource::LocalVideo { video_path } => Some(PathBuf::from(video_path)),
+        DeepVideoSource::DownloadedDouyinVideo { video_path, .. } => {
+            Some(PathBuf::from(video_path))
+        }
+        DeepVideoSource::TextOnly { .. } => None,
     }
 }
 
@@ -115,6 +130,7 @@ mod tests {
             task_id: Some("task-1".to_string()),
             title: "sample.mp4".to_string(),
             profile: AnalysisProfile::Economy,
+            use_frame_analysis: true,
             transcript: None,
             ocr_items: Vec::new(),
             reference_text: None,
@@ -144,12 +160,12 @@ mod tests {
             "task-1",
             &request,
             frames,
-            sheet,
+            Some(sheet),
             candidates,
             DeepVideoArtifacts {
                 request_json: "request.json".to_string(),
                 frame_result_json: "frame_result.json".to_string(),
-                evidence_sheet_jpg: "evidence_sheet.jpg".to_string(),
+                evidence_sheet_jpg: Some("evidence_sheet.jpg".to_string()),
                 candidate_segments_json: "candidate_segments.json".to_string(),
                 vision_result_json: None,
                 evidence_timeline_json: "timeline.json".to_string(),
@@ -163,5 +179,43 @@ mod tests {
             .report_markdown
             .contains("sample.mp4 Deep Video Analysis"));
         assert_eq!(result.timeline.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn text_only_analysis_does_not_require_existing_video_source() {
+        let request = DeepVideoAnalysisRequest {
+            source: DeepVideoSource::LocalVideo {
+                video_path: "C:/tmp/does-not-exist/text-only.mp4".to_string(),
+            },
+            task_id: Some(format!(
+                "text-only-{}",
+                chrono::Utc::now().timestamp_millis()
+            )),
+            title: "text only".to_string(),
+            profile: AnalysisProfile::Balanced,
+            use_frame_analysis: false,
+            transcript: Some(crate::deep_video::types::TranscriptInput {
+                text: "Limited offer. Tap now to claim it.".to_string(),
+                segments: vec![crate::deep_video::types::TranscriptSegment {
+                    text: "Limited offer. Tap now to claim it.".to_string(),
+                    start_seconds: Some(1.0),
+                    end_seconds: Some(4.0),
+                }],
+            }),
+            ocr_items: Vec::new(),
+            reference_text: None,
+        };
+
+        let result = run_deep_video_analysis(request).await.unwrap();
+
+        assert!(result.frames.is_empty());
+        assert!(result.evidence_sheet.is_none());
+        assert!(result.artifacts.evidence_sheet_jpg.is_none());
+        assert!(result
+            .timeline
+            .iter()
+            .any(|item| item.kind == crate::deep_video::types::EvidenceKind::Candidate));
+        assert!(!result.report_markdown.contains("contact sheet"));
+        assert!(!result.report_markdown.contains("frame IDs"));
     }
 }

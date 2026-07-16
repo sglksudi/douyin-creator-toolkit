@@ -1,6 +1,6 @@
 // 任务队列相关命令
 
-use crate::data::task_queue::{TaskQueue, Task, TaskType, TaskStatus, QueueStats};
+use crate::data::task_queue::{QueueStats, Task, TaskQueue, TaskStatus, TaskType};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -44,9 +44,9 @@ impl From<Task> for TaskInfo {
             TaskStatus::Failed(e) => ("failed".to_string(), Some(e.clone())),
             TaskStatus::Cancelled => ("cancelled".to_string(), None),
         };
-        
+
         let task_type = task_type_label(&task.task_type);
-        
+
         TaskInfo {
             id: task.id,
             description: task.task_type.description(),
@@ -92,10 +92,12 @@ pub async fn add_transcription_task(
     video_path: String,
     video_name: String,
 ) -> Result<String, String> {
-    let id = TASK_QUEUE.add_task(TaskType::VideoTranscription { 
-        video_path, 
-        video_name 
-    }).await;
+    let id = TASK_QUEUE
+        .add_task(TaskType::VideoTranscription {
+            video_path,
+            video_name,
+        })
+        .await;
     Ok(id)
 }
 
@@ -113,42 +115,49 @@ pub async fn add_download_task(
     output_path: String,
     video_name: String,
 ) -> Result<String, String> {
-    let id = TASK_QUEUE.add_task(TaskType::VideoDownload { 
-        url, 
-        output_path, 
-        video_name 
-    }).await;
+    let id = TASK_QUEUE
+        .add_task(TaskType::VideoDownload {
+            url,
+            output_path,
+            video_name,
+        })
+        .await;
     Ok(id)
 }
 
 /// 添加 AI 分析任务
 #[tauri::command]
-pub async fn add_analysis_task(
-    content: String,
-    video_id: String,
-) -> Result<String, String> {
-    let id = TASK_QUEUE.add_task(TaskType::AiAnalysis { content, video_id }).await;
+pub async fn add_analysis_task(content: String, video_id: String) -> Result<String, String> {
+    let id = TASK_QUEUE
+        .add_task(TaskType::AiAnalysis { content, video_id })
+        .await;
     Ok(id)
 }
 
 /// 暂停任务
 #[tauri::command]
 pub async fn pause_task(task_id: String) -> Result<(), String> {
-    TASK_QUEUE.pause_task(&task_id).await
+    TASK_QUEUE
+        .pause_task(&task_id)
+        .await
         .map_err(|e| e.to_string())
 }
 
 /// 继续任务
 #[tauri::command]
 pub async fn resume_task(task_id: String) -> Result<(), String> {
-    TASK_QUEUE.resume_task(&task_id).await
+    TASK_QUEUE
+        .resume_task(&task_id)
+        .await
         .map_err(|e| e.to_string())
 }
 
 /// 取消任务
 #[tauri::command]
 pub async fn cancel_task(task_id: String) -> Result<(), String> {
-    TASK_QUEUE.cancel_task(&task_id).await
+    TASK_QUEUE
+        .cancel_task(&task_id)
+        .await
         .map_err(|e| e.to_string())
 }
 
@@ -156,14 +165,17 @@ pub async fn cancel_task(task_id: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn get_task_status(task_id: String) -> Result<Option<String>, String> {
     let status = TASK_QUEUE.get_task_status(&task_id).await;
-    Ok(status.map(|s| match s {
-        TaskStatus::Pending => "pending",
-        TaskStatus::Running => "running",
-        TaskStatus::Paused => "paused",
-        TaskStatus::Completed => "completed",
-        TaskStatus::Failed(_) => "failed",
-        TaskStatus::Cancelled => "cancelled",
-    }.to_string()))
+    Ok(status.map(|s| {
+        match s {
+            TaskStatus::Pending => "pending",
+            TaskStatus::Running => "running",
+            TaskStatus::Paused => "paused",
+            TaskStatus::Completed => "completed",
+            TaskStatus::Failed(_) => "failed",
+            TaskStatus::Cancelled => "cancelled",
+        }
+        .to_string()
+    }))
 }
 
 /// 获取任务详情
@@ -224,27 +236,36 @@ pub async fn clear_pending_tasks() -> Result<(), String> {
 
 /// 发送任务进度更新事件
 pub fn emit_task_progress(app: &AppHandle, task_id: &str, progress: f32, status: &str) {
-    let _ = app.emit("task-progress", serde_json::json!({
-        "task_id": task_id,
-        "progress": progress,
-        "status": status,
-    }));
+    let _ = app.emit(
+        "task-progress",
+        serde_json::json!({
+            "task_id": task_id,
+            "progress": progress,
+            "status": status,
+        }),
+    );
 }
 
 /// 发送任务完成事件
 pub fn emit_task_completed(app: &AppHandle, task_id: &str, result: Option<&str>) {
-    let _ = app.emit("task-completed", serde_json::json!({
-        "task_id": task_id,
-        "result": result,
-    }));
+    let _ = app.emit(
+        "task-completed",
+        serde_json::json!({
+            "task_id": task_id,
+            "result": result,
+        }),
+    );
 }
 
 /// 发送任务失败事件
 pub fn emit_task_failed(app: &AppHandle, task_id: &str, error: &str) {
-    let _ = app.emit("task-failed", serde_json::json!({
-        "task_id": task_id,
-        "error": error,
-    }));
+    let _ = app.emit(
+        "task-failed",
+        serde_json::json!({
+            "task_id": task_id,
+            "error": error,
+        }),
+    );
 }
 
 /// 获取全局任务队列实例（供其他模块使用）
@@ -260,10 +281,11 @@ mod tests {
     #[test]
     fn maps_deep_video_task_type_label() {
         let task_type = TaskType::DeepVideoAnalysis {
-            video_path: "sample.mp4".to_string(),
-            video_name: "sample.mp4".to_string(),
+            source_path: Some("sample.mp4".to_string()),
+            source_name: "sample.mp4".to_string(),
             profile: AnalysisProfile::Economy,
             transcript_task_id: None,
+            use_frame_analysis: true,
         };
 
         assert_eq!(task_type_label(&task_type), "deep_video_analysis");

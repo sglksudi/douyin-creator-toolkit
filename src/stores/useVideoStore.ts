@@ -59,6 +59,7 @@ export interface DeepAnalysisState {
   progress?: number;
   resultPath?: string;
   error?: string;
+  useFrameAnalysis?: boolean;
 }
 
 export interface VideoItem extends VideoInfo {
@@ -104,6 +105,14 @@ interface TaskFailedEvent {
   error: string;
 }
 
+interface TaskInfo {
+  id: string;
+  status: "pending" | "running" | "paused" | "completed" | "failed" | "cancelled";
+  progress: number;
+  result?: string | null;
+  error?: string | null;
+}
+
 export interface BatchProcessResult {
   total: number;
   completed: number;
@@ -136,7 +145,7 @@ interface VideoStore {
 
   // AI Analysis
   analyzeVideo: (id: string) => Promise<void>;
-  startDeepAnalysis: (id: string, profile: DeepAnalysisProfile) => Promise<void>;
+  startDeepAnalysis: (id: string, profile: DeepAnalysisProfile, useFrameAnalysis: boolean) => Promise<void>;
 
   // Export
   exportToDocx: (outputPath: string) => Promise<string>;
@@ -474,7 +483,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
     }
   },
 
-  startDeepAnalysis: async (id: string, profile: DeepAnalysisProfile) => {
+  startDeepAnalysis: async (id: string, profile: DeepAnalysisProfile, useFrameAnalysis: boolean) => {
     const { videos } = get();
     const video = videos.find((v) => v.id === id);
     if (!video) return;
@@ -482,7 +491,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
     set((state) => ({
       videos: state.videos.map((v) =>
         v.id === id
-          ? { ...v, deepAnalysis: { status: "running" as const, progress: 0 } }
+          ? { ...v, deepAnalysis: { status: "running" as const, progress: 0, useFrameAnalysis } }
           : v
       ),
     }));
@@ -494,6 +503,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
           task_id: video.id,
           title: video.name,
           profile,
+          use_frame_analysis: useFrameAnalysis,
           transcript: video.transcript
             ? { text: video.transcript, segments: [] }
             : null,
@@ -505,10 +515,12 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
       set((state) => ({
         videos: state.videos.map((v) =>
           v.id === id
-            ? { ...v, deepAnalysis: { status: "running" as const, taskId, progress: 0 } }
+            ? { ...v, deepAnalysis: { status: "running" as const, taskId, progress: 0, useFrameAnalysis } }
             : v
         ),
       }));
+
+      void reconcileDeepAnalysisTask(id, taskId, useFrameAnalysis);
     } catch (error) {
       set((state) => ({
         videos: state.videos.map((v) =>
@@ -521,3 +533,34 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
     }
   },
 }));
+
+async function reconcileDeepAnalysisTask(
+  videoId: string,
+  taskId: string,
+  useFrameAnalysis: boolean
+) {
+  try {
+    const task = await invoke<TaskInfo | null>("get_task_info", { taskId });
+    if (!task || (task.status !== "completed" && task.status !== "failed")) return;
+
+    useVideoStore.setState((state) => ({
+      videos: state.videos.map((v) => {
+        if (v.id !== videoId || v.deepAnalysis?.taskId !== taskId) return v;
+
+        return {
+          ...v,
+          deepAnalysis: {
+            ...v.deepAnalysis,
+            status: task.status === "completed" ? "completed" : "failed",
+            progress: task.status === "completed" ? 100 : v.deepAnalysis.progress,
+            resultPath: task.result ?? v.deepAnalysis.resultPath,
+            error: task.error ?? v.deepAnalysis.error,
+            useFrameAnalysis,
+          },
+        };
+      }),
+    }));
+  } catch (error) {
+    console.warn("[VideoStore] Failed to reconcile deep analysis task:", error);
+  }
+}

@@ -39,10 +39,11 @@ pub enum TaskType {
         video_id: String,
     },
     DeepVideoAnalysis {
-        video_path: String,
-        video_name: String,
+        source_path: Option<String>,
+        source_name: String,
         profile: AnalysisProfile,
         transcript_task_id: Option<String>,
+        use_frame_analysis: bool,
     },
 }
 
@@ -59,7 +60,8 @@ impl TaskType {
                 format!("下载视频: {}", video_name)
             }
             TaskType::AiAnalysis { .. } => "AI 分析".to_string(),
-            TaskType::DeepVideoAnalysis { video_name, .. } => {
+            TaskType::DeepVideoAnalysis { source_name, .. } => {
+                let video_name = source_name;
                 format!("深度视频分析: {}", video_name)
             }
         }

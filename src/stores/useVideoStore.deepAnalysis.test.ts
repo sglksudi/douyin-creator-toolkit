@@ -23,4 +23,5 @@ const analyzedVideo: VideoItem = {
 };
 
 void analyzedVideo.deepAnalysis?.status;
-void useVideoStore.getState().startDeepAnalysis(analyzedVideo.id, profile);
+void useVideoStore.getState().startDeepAnalysis(analyzedVideo.id, profile, false);
+void useVideoStore.getState().startDeepAnalysis(analyzedVideo.id, profile, true);

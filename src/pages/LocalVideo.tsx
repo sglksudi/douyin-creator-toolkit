@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import {
   Upload,
   FileVideo,
@@ -57,6 +58,7 @@ export function LocalVideo() {
   const [isDragging, setIsDragging] = useState(false);
   const [analyzingId, setAnalyzingId] = useState<string | null>(null);
   const [deepProfile, setDeepProfile] = useState<DeepAnalysisProfile>("balanced");
+  const [deepUseFrameAnalysis, setDeepUseFrameAnalysis] = useState(false);
   const [deepAnalyzingId, setDeepAnalyzingId] = useState<string | null>(null);
 
   // Chat Modal State
@@ -168,7 +170,7 @@ export function LocalVideo() {
   const handleDeepAnalyze = async (video: VideoItem) => {
     setDeepAnalyzingId(video.id);
     try {
-      await startDeepAnalysis(video.id, deepProfile);
+      await startDeepAnalysis(video.id, deepProfile, deepUseFrameAnalysis);
       toast({ title: "深度分析已启动", description: "证据图和报告会写入本地任务产物目录" });
     } catch (error) {
       toast({ title: "深度分析失败", description: String(error), variant: "error" });
@@ -607,10 +609,19 @@ export function LocalVideo() {
                             <Sparkles className="w-3.5 h-3.5 mr-1.5" />
                             {analyzingId === video.id ? "智能分析中..." : "AI 深度分析"}
                           </Button>
+                          <div className="flex h-8 items-center gap-2 rounded-md border border-teal-200 bg-white px-2 text-xs text-teal-700 shadow-sm dark:border-teal-800 dark:bg-zinc-900 dark:text-teal-300">
+                            <span>{deepUseFrameAnalysis ? "画面证据" : "文案模式"}</span>
+                            <Switch
+                              checked={deepUseFrameAnalysis}
+                              onCheckedChange={setDeepUseFrameAnalysis}
+                              aria-label="画面证据"
+                            />
+                          </div>
                           <select
                             value={deepProfile}
                             onChange={(event) => setDeepProfile(event.target.value as DeepAnalysisProfile)}
-                            className="h-8 rounded-md border border-teal-200 bg-white px-2 text-xs text-teal-700 shadow-sm outline-none transition-colors hover:bg-teal-50 focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 dark:border-teal-800 dark:bg-zinc-900 dark:text-teal-300 dark:hover:bg-teal-950/30"
+                            disabled={!deepUseFrameAnalysis}
+                            className="h-8 rounded-md border border-teal-200 bg-white px-2 text-xs text-teal-700 shadow-sm outline-none transition-colors hover:bg-teal-50 focus:border-teal-400 focus:ring-2 focus:ring-teal-500/20 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:text-zinc-400 disabled:hover:bg-white dark:border-teal-800 dark:bg-zinc-900 dark:text-teal-300 dark:hover:bg-teal-950/30 dark:disabled:border-zinc-800 dark:disabled:text-zinc-500"
                             aria-label="证据链分析档位"
                           >
                             <option value="economy">省钱</option>

@@ -5,6 +5,7 @@ pub fn build_markdown_report(
     title: &str,
     timeline: &[EvidenceItem],
     candidates: &[CandidateSegment],
+    has_frame_evidence: bool,
 ) -> String {
     let mut lines = vec![
         format!("# {title} Deep Video Analysis"),
@@ -15,7 +16,11 @@ pub fn build_markdown_report(
             timeline.len(),
             candidates.len()
         ),
-        "- Vision confirmation is disabled in Phase 1; claims are limited to transcript, OCR, and frame evidence.".to_string(),
+        if has_frame_evidence {
+            "- Vision confirmation is disabled in Phase 1; claims are limited to transcript, OCR, and frame evidence.".to_string()
+        } else {
+            "- Frame evidence is disabled; claims are limited to transcript, OCR, and reference text.".to_string()
+        },
         String::new(),
         "## Candidate Structure".to_string(),
     ];
@@ -48,13 +53,23 @@ pub fn build_markdown_report(
         ));
     }
 
-    lines.extend([
-        String::new(),
-        "## Recommendations".to_string(),
-        "- Add vision confirmation in Phase 2 for frame-level visual claims.".to_string(),
-        "- Keep frame citations stable by referencing frame IDs from the contact sheet."
-            .to_string(),
-    ]);
+    lines.extend([String::new(), "## Recommendations".to_string()]);
+    if has_frame_evidence {
+        lines.push(
+            "- Add vision confirmation in Phase 2 for frame-level visual claims.".to_string(),
+        );
+        lines.push(
+            "- Keep frame citations stable by referencing frame IDs from the contact sheet."
+                .to_string(),
+        );
+    } else {
+        lines.push(
+            "- Enable frame evidence when visual proof is needed for the selected text candidates."
+                .to_string(),
+        );
+        lines
+            .push("- Keep text-only evidence separate from later visual confirmation.".to_string());
+    }
 
     lines.join("\n")
 }
@@ -91,9 +106,18 @@ mod tests {
             source: CandidateSource::Asr,
         }];
 
-        let report = build_markdown_report("sample.mp4", &timeline, &candidates);
+        let report = build_markdown_report("sample.mp4", &timeline, &candidates, false);
 
         assert!(report.contains("# sample.mp4 Deep Video Analysis"));
         assert!(report.contains("[00:00.0-00:03.0]"));
+    }
+
+    #[test]
+    fn text_only_report_omits_contact_sheet_guidance() {
+        let report = build_markdown_report("sample.mp4", &[], &[], false);
+
+        assert!(report.contains("Frame evidence is disabled"));
+        assert!(!report.contains("contact sheet"));
+        assert!(!report.contains("frame IDs"));
     }
 }

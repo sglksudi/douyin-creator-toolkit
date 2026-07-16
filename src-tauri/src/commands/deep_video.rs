@@ -13,14 +13,14 @@ pub async fn start_deep_video_analysis(
     app: AppHandle,
     request: DeepVideoAnalysisRequest,
 ) -> Result<String, String> {
-    let (video_path, video_name) = match &request.source {
+    let (source_path, source_name) = match &request.source {
         DeepVideoSource::LocalVideo { video_path } => {
             let name = std::path::Path::new(video_path)
                 .file_name()
                 .and_then(|value| value.to_str())
                 .unwrap_or("video")
                 .to_string();
-            (video_path.clone(), name)
+            (Some(video_path.clone()), name)
         }
         DeepVideoSource::DownloadedDouyinVideo { video_path, .. } => {
             let name = std::path::Path::new(video_path)
@@ -28,16 +28,21 @@ pub async fn start_deep_video_analysis(
                 .and_then(|value| value.to_str())
                 .unwrap_or("video")
                 .to_string();
-            (video_path.clone(), name)
+            (Some(video_path.clone()), name)
+        }
+        DeepVideoSource::TextOnly { source_url } => {
+            let name = source_url.clone().unwrap_or_else(|| request.title.clone());
+            (None, name)
         }
     };
 
     let task_id = get_task_queue()
         .add_task(TaskType::DeepVideoAnalysis {
-            video_path,
-            video_name,
+            source_path,
+            source_name,
             profile: request.profile.clone(),
             transcript_task_id: request.task_id.clone(),
+            use_frame_analysis: request.use_frame_analysis,
         })
         .await;
 
