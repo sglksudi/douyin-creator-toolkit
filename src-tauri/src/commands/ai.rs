@@ -217,33 +217,20 @@ pub async fn import_knowledge_base(import_path: String) -> Result<(), String> {
 pub async fn update_ai_settings(settings: AiSettings) -> Result<(), String> {
     let mut service = AI_SERVICE.lock();
 
-    // 设置提供者类型
-    service.set_custom_api_providers(settings.custom_api_providers);
-    service.set_provider_from_key(settings.provider);
-
-    // 设置 API Keys
-    if let Some(key) = settings.doubao_api_key {
-        if !key.is_empty() {
-            service.set_doubao_key(key);
-        }
-    }
-    if let Some(key) = settings.openai_api_key {
-        if !key.is_empty() {
-            service.set_openai_key(key);
-        }
-    }
-    if let Some(key) = settings.deepseek_api_key {
-        if !key.is_empty() {
-            service.set_deepseek_key(key);
-        }
-    }
-
-    // 设置 LM Studio URL
-    if !settings.lm_studio_url.is_empty() {
-        service.set_lm_studio_url(settings.lm_studio_url);
-    }
+    apply_ai_settings(&mut service, settings);
 
     Ok(())
+}
+
+pub(crate) fn apply_ai_settings(service: &mut AiService, settings: AiSettings) {
+    service.set_custom_api_providers(settings.custom_api_providers);
+    service.set_provider_from_key(settings.provider);
+    service.doubao_api_key = settings.doubao_api_key.filter(|key| !key.trim().is_empty());
+    service.openai_api_key = settings.openai_api_key.filter(|key| !key.trim().is_empty());
+    service.deepseek_api_key = settings
+        .deepseek_api_key
+        .filter(|key| !key.trim().is_empty());
+    service.lm_studio_url = settings.lm_studio_url;
 }
 
 /// 获取 AI 设置
@@ -682,5 +669,42 @@ pub async fn chat_with_ai(
             error!("AI 对话失败: {}", e);
             Err(format!("AI 对话失败: {}", e))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn applying_settings_clears_existing_api_keys() {
+        let mut service = AiService::new();
+        service.openai_api_key = Some("old".into());
+
+        apply_ai_settings(&mut service, AiSettings::default());
+
+        assert_eq!(service.openai_api_key, None);
+    }
+
+    #[test]
+    fn applying_settings_treats_blank_api_keys_as_cleared() {
+        let mut service = AiService::new();
+        service.doubao_api_key = Some("old-doubao".into());
+        service.openai_api_key = Some("old-openai".into());
+        service.deepseek_api_key = Some("old-deepseek".into());
+
+        apply_ai_settings(
+            &mut service,
+            AiSettings {
+                doubao_api_key: Some(" ".into()),
+                openai_api_key: Some("\t".into()),
+                deepseek_api_key: Some("\n".into()),
+                ..AiSettings::default()
+            },
+        );
+
+        assert_eq!(service.doubao_api_key, None);
+        assert_eq!(service.openai_api_key, None);
+        assert_eq!(service.deepseek_api_key, None);
     }
 }

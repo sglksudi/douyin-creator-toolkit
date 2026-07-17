@@ -57,33 +57,21 @@ pub fn init_data_layer() -> Result<(), String> {
 
 /// 同步恢复 AI 设置 (供 init_data_layer 调用)
 fn restore_ai_settings_sync(config: crate::data::AppConfig) {
-    use crate::commands::ai::AI_SERVICE;
+    use crate::commands::ai::{apply_ai_settings, AiSettings, AI_SERVICE};
 
     let mut service = AI_SERVICE.lock();
 
-    // 设置提供者类型
-    service.set_custom_api_providers(config.custom_api_providers);
-    service.set_provider_from_key(config.ai_provider);
-
-    // 设置 API Keys
-    if let Some(key) = config.doubao_api_key {
-        if !key.is_empty() {
-            service.set_doubao_key(key);
-        }
-    }
-    if let Some(key) = config.openai_api_key {
-        if !key.is_empty() {
-            service.set_openai_key(key);
-        }
-    }
-    if let Some(key) = config.deepseek_api_key {
-        if !key.is_empty() {
-            service.set_deepseek_key(key);
-        }
-    }
-    if !config.lm_studio_url.is_empty() {
-        service.set_lm_studio_url(config.lm_studio_url);
-    }
+    apply_ai_settings(
+        &mut service,
+        AiSettings {
+            provider: config.ai_provider,
+            doubao_api_key: config.doubao_api_key,
+            openai_api_key: config.openai_api_key,
+            deepseek_api_key: config.deepseek_api_key,
+            lm_studio_url: config.lm_studio_url,
+            custom_api_providers: config.custom_api_providers,
+        },
+    );
 
     info!("AI 设置已恢复");
 }
@@ -258,7 +246,9 @@ pub async fn reset_settings() -> Result<AppSettings, String> {
         .map_err(|e| format!("重置设置失败: {}", e))?;
 
     let config = config_manager.get();
-    Ok(AppSettings::from(config))
+    let settings = AppSettings::from(config.clone());
+    restore_ai_settings_sync(config);
+    Ok(settings)
 }
 
 /// 选择目录
