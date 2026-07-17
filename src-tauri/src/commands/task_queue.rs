@@ -249,8 +249,11 @@ pub async fn clear_task_history() -> Result<(), String> {
 /// 清空待处理任务
 #[tauri::command]
 pub async fn clear_pending_tasks() -> Result<(), String> {
-    TASK_QUEUE.clear_pending().await;
-    Ok(())
+    with_deep_video_lifecycle_lock(async {
+        TASK_QUEUE.clear_pending().await;
+        Ok(())
+    })
+    .await
 }
 
 /// 发送任务进度更新事件
@@ -304,7 +307,9 @@ pub fn get_task_queue() -> &'static TaskQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::deep_video::with_deep_video_lifecycle_lock;
     use crate::deep_video::types::AnalysisProfile;
+    use std::task::Poll;
 
     #[test]
     fn maps_deep_video_task_type_label() {
@@ -317,5 +322,19 @@ mod tests {
         };
 
         assert_eq!(task_type_label(&task_type), "deep_video_analysis");
+    }
+
+    #[tokio::test]
+    async fn clear_pending_tasks_waits_for_deep_video_startup() {
+        let mut startup = Box::pin(with_deep_video_lifecycle_lock(async {
+            std::future::pending::<()>().await;
+        }));
+        assert!(matches!(futures_util::poll!(startup.as_mut()), Poll::Pending));
+
+        let mut clear = Box::pin(clear_pending_tasks());
+        assert!(matches!(futures_util::poll!(clear.as_mut()), Poll::Pending));
+
+        drop(startup);
+        clear.await.unwrap();
     }
 }
