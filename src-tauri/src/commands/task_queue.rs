@@ -1,6 +1,8 @@
 // 任务队列相关命令
 
-use crate::commands::deep_video::abort_deep_video_task;
+use crate::commands::deep_video::{
+    abort_deep_video_task, with_deep_video_lifecycle_lock,
+};
 use crate::data::task_queue::{QueueStats, Task, TaskQueue, TaskStatus, TaskType};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -156,12 +158,25 @@ pub async fn resume_task(task_id: String) -> Result<(), String> {
 /// 取消任务
 #[tauri::command]
 pub async fn cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
+    let is_deep_video_task = matches!(
+        TASK_QUEUE.get_task(&task_id).await.map(|task| task.task_type),
+        Some(TaskType::DeepVideoAnalysis { .. })
+    );
+
+    if is_deep_video_task {
+        with_deep_video_lifecycle_lock(cancel_task_inner(&app, &task_id)).await
+    } else {
+        cancel_task_inner(&app, &task_id).await
+    }
+}
+
+async fn cancel_task_inner(app: &AppHandle, task_id: &str) -> Result<(), String> {
     TASK_QUEUE
-        .cancel_task(&task_id)
+        .cancel_task(task_id)
         .await
         .map_err(|e| e.to_string())?;
-    abort_deep_video_task(&task_id);
-    emit_task_cancelled(&app, &task_id);
+    abort_deep_video_task(task_id);
+    emit_task_cancelled(app, task_id);
     Ok(())
 }
 

@@ -142,7 +142,7 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   clearPending: async () => {
     try {
       await invoke('clear_pending_tasks');
-      set({ tasks: [] });
+      await get().fetchTasks();
       await get().fetchStats();
     } catch (error) {
       set({ error: String(error) });
