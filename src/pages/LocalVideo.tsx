@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useCallback } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { save } from "@tauri-apps/plugin-dialog";
 import { Button } from "@/components/ui/button";
@@ -49,7 +49,6 @@ export function LocalVideo() {
     startDeepAnalysis,
     exportToDocx,
     exportToTxt,
-    setupProgressListener,
     concurrency,
     setConcurrency
   } = useVideoStore();
@@ -66,13 +65,6 @@ export function LocalVideo() {
   const [chatContext, setChatContext] = useState("");
   const [chatTitle, setChatTitle] = useState("");
   const [activeVideoId, setActiveVideoId] = useState<string | null>(null);
-
-  // 设置进度监听器
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    setupProgressListener().then((fn) => { unlisten = fn; });
-    return () => { if (unlisten) unlisten(); };
-  }, [setupProgressListener]);
 
   // 处理文件选择
   const handleSelectFiles = useCallback(async () => {
@@ -369,6 +361,7 @@ export function LocalVideo() {
       case "running": return analysis.progress ? `分析中 ${analysis.progress}%` : "分析中";
       case "completed": return "已完成";
       case "failed": return "失败";
+      case "cancelled": return "\u5df2\u53d6\u6d88";
     }
   };
 

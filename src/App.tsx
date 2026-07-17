@@ -6,6 +6,8 @@ import { ThemeProvider } from "@/components/ThemeProvider";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { AgreementModal } from "@/components/AgreementModal";
 import { invoke } from "@tauri-apps/api/core";
+import { useVideoStore } from "@/stores/useVideoStore";
+import { useDouyinLinkStore } from "@/stores/useDouyinLinkStore";
 
 // 懒加载页面组件
 const LocalVideo = lazy(() => import("@/pages/LocalVideo").then(m => ({ default: m.LocalVideo })));
@@ -117,6 +119,32 @@ function App() {
     }, 1000);
 
     return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const cleanups: Array<() => void> = [];
+
+    const register = async (setupProgressListener: () => Promise<() => void>) => {
+      const cleanup = await setupProgressListener();
+      if (disposed) {
+        cleanup();
+      } else {
+        cleanups.push(cleanup);
+      }
+    };
+
+    void Promise.all([
+      register(useVideoStore.getState().setupProgressListener),
+      register(useDouyinLinkStore.getState().setupProgressListener),
+    ]).catch((error) => {
+      console.error("Failed to setup progress listeners:", error);
+    });
+
+    return () => {
+      disposed = true;
+      cleanups.forEach((cleanup) => cleanup());
+    };
   }, []);
 
   const renderPage = () => {

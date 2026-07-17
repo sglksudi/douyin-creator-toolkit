@@ -17,7 +17,7 @@ const analyzedVideo: VideoItem = {
   stage: "",
   transcript: "sample transcript",
   deepAnalysis: {
-    status: "completed",
+    status: "cancelled",
     taskId: "task-1",
   },
 };

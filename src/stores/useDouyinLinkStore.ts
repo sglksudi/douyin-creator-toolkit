@@ -36,9 +36,10 @@ export interface LinkItem {
 }
 
 export type DeepAnalysisProfile = "economy" | "balanced" | "precise";
+export type DeepAnalysisStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
 
 export interface DeepAnalysisState {
-  status: "idle" | "running" | "completed" | "failed";
+  status: DeepAnalysisStatus;
   taskId?: string;
   progress?: number;
   resultPath?: string;
@@ -73,6 +74,10 @@ interface TaskCompletedEvent {
 interface TaskFailedEvent {
   task_id: string;
   error: string;
+}
+
+interface TaskCancelledEvent {
+  task_id: string;
 }
 
 interface TaskInfo {
@@ -347,6 +352,7 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
     const { links } = get();
     const link = links.find((l) => l.id === id);
     if (!link || !link.transcript) return;
+    if (link.deepAnalysis?.status === "running") return;
 
     if (useFrameAnalysis && !link.localVideoPath) {
       throw new Error("Frame evidence requires a cached local video. Re-extract the link transcript first.");
@@ -467,7 +473,11 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
               ...l,
               deepAnalysis: {
                 ...l.deepAnalysis,
-                status: progress.status === "completed" ? "completed" : "running",
+                status: progress.status === "completed"
+                  ? "completed"
+                  : progress.status === "cancelled"
+                    ? "cancelled"
+                    : "running",
                 progress: Math.round(progress.progress * 100),
               },
             }
@@ -515,11 +525,40 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
       }));
     });
 
+    const unlistenTaskCancelled = await listen<TaskCancelledEvent>("task-cancelled", (event) => {
+      const cancelled = event.payload;
+
+      set((state) => ({
+        links: state.links.map((l) =>
+          l.deepAnalysis?.taskId === cancelled.task_id
+            ? {
+              ...l,
+              deepAnalysis: {
+                ...l.deepAnalysis,
+                status: "cancelled",
+              },
+            }
+            : l
+        ),
+      }));
+    });
+
+    await Promise.all(
+      get().links
+        .filter((link) => link.deepAnalysis?.status === "running" && link.deepAnalysis.taskId)
+        .map((link) => reconcileDeepAnalysisTask(
+          link.id,
+          link.deepAnalysis!.taskId!,
+          Boolean(link.deepAnalysis!.useFrameAnalysis)
+        ))
+    );
+
     return () => {
       unlistenParseProgress();
       unlistenTaskProgress();
       unlistenTaskCompleted();
       unlistenTaskFailed();
+      unlistenTaskCancelled();
     };
   },
 
@@ -539,7 +578,7 @@ async function reconcileDeepAnalysisTask(
 ) {
   try {
     const task = await invoke<TaskInfo | null>("get_task_info", { taskId });
-    if (!task || (task.status !== "completed" && task.status !== "failed")) return;
+    if (!task || (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled")) return;
 
     useDouyinLinkStore.setState((state) => ({
       links: state.links.map((link) => {
@@ -549,7 +588,11 @@ async function reconcileDeepAnalysisTask(
           ...link,
           deepAnalysis: {
             ...link.deepAnalysis,
-            status: task.status === "completed" ? "completed" : "failed",
+            status: task.status === "completed"
+              ? "completed"
+              : task.status === "failed"
+                ? "failed"
+                : "cancelled",
             progress: task.status === "completed" ? 100 : link.deepAnalysis.progress,
             resultPath: task.result ?? link.deepAnalysis.resultPath,
             error: task.error ?? link.deepAnalysis.error,

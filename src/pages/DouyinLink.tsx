@@ -297,7 +297,9 @@ function LinkResultCard({
                               : "分析中"
                             : link.deepAnalysis.status === "completed"
                               ? "已完成"
-                              : link.deepAnalysis.status === "failed"
+                              : link.deepAnalysis.status === "cancelled"
+                                ? "\u5df2\u53d6\u6d88"
+                                : link.deepAnalysis.status === "failed"
                                 ? "失败"
                                 : "未开始"}
                         </span>
@@ -361,7 +363,6 @@ export function DouyinLink() {
     parseAllLinks,
     retryFailedLinks,
     checkServicesHealth,
-    setupProgressListener,
     getSuccessfulLinks,
     getFailedLinks,
   } = useDouyinLinkStore();
@@ -381,19 +382,6 @@ export function DouyinLink() {
   const linkCount = (linksText.match(/(https?:\/\/(?:v|www)\.douyin\.com\/[^\s]+)/g) || []).length;
   const successCount = getSuccessfulLinks().length;
   const failedCount = getFailedLinks().length;
-
-  // Setup progress listener
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-
-    setupProgressListener().then((fn) => {
-      unlisten = fn;
-    });
-
-    return () => {
-      if (unlisten) unlisten();
-    };
-  }, [setupProgressListener]);
 
   // Check services health on mount
   useEffect(() => {

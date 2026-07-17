@@ -9,7 +9,7 @@ const analyzedLink: LinkItem = {
   localVideoPath: "C:/tmp/douyin_creator_tools/example.mp4",
   useFrameAnalysis: false,
   deepAnalysis: {
-    status: "completed",
+    status: "cancelled",
     taskId: "task-1",
   },
 };

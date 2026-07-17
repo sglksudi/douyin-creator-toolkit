@@ -52,9 +52,10 @@ export interface AnalysisResult {
 }
 
 export type DeepAnalysisProfile = "economy" | "balanced" | "precise";
+export type DeepAnalysisStatus = "idle" | "running" | "completed" | "failed" | "cancelled";
 
 export interface DeepAnalysisState {
-  status: "idle" | "running" | "completed" | "failed";
+  status: DeepAnalysisStatus;
   taskId?: string;
   progress?: number;
   resultPath?: string;
@@ -103,6 +104,10 @@ interface TaskCompletedEvent {
 interface TaskFailedEvent {
   task_id: string;
   error: string;
+}
+
+interface TaskCancelledEvent {
+  task_id: string;
 }
 
 interface TaskInfo {
@@ -339,7 +344,11 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
               ...v,
               deepAnalysis: {
                 ...v.deepAnalysis,
-                status: progress.status === "completed" ? "completed" : "running",
+                status: progress.status === "completed"
+                  ? "completed"
+                  : progress.status === "cancelled"
+                    ? "cancelled"
+                    : "running",
                 progress: Math.round(progress.progress * 100),
               },
             }
@@ -387,11 +396,40 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
       }));
     });
 
+    const unlistenTaskCancelled = await listen<TaskCancelledEvent>("task-cancelled", (event) => {
+      const cancelled = event.payload;
+
+      set((state) => ({
+        videos: state.videos.map((v) =>
+          v.deepAnalysis?.taskId === cancelled.task_id
+            ? {
+              ...v,
+              deepAnalysis: {
+                ...v.deepAnalysis,
+                status: "cancelled",
+              },
+            }
+            : v
+        ),
+      }));
+    });
+
+    await Promise.all(
+      get().videos
+        .filter((video) => video.deepAnalysis?.status === "running" && video.deepAnalysis.taskId)
+        .map((video) => reconcileDeepAnalysisTask(
+          video.id,
+          video.deepAnalysis!.taskId!,
+          Boolean(video.deepAnalysis!.useFrameAnalysis)
+        ))
+    );
+
     return () => {
       unlistenVideoProgress();
       unlistenTaskProgress();
       unlistenTaskCompleted();
       unlistenTaskFailed();
+      unlistenTaskCancelled();
     };
   },
 
@@ -487,6 +525,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
     const { videos } = get();
     const video = videos.find((v) => v.id === id);
     if (!video) return;
+    if (video.deepAnalysis?.status === "running") return;
 
     set((state) => ({
       videos: state.videos.map((v) =>
@@ -541,7 +580,7 @@ async function reconcileDeepAnalysisTask(
 ) {
   try {
     const task = await invoke<TaskInfo | null>("get_task_info", { taskId });
-    if (!task || (task.status !== "completed" && task.status !== "failed")) return;
+    if (!task || (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled")) return;
 
     useVideoStore.setState((state) => ({
       videos: state.videos.map((v) => {
@@ -551,7 +590,11 @@ async function reconcileDeepAnalysisTask(
           ...v,
           deepAnalysis: {
             ...v.deepAnalysis,
-            status: task.status === "completed" ? "completed" : "failed",
+            status: task.status === "completed"
+              ? "completed"
+              : task.status === "failed"
+                ? "failed"
+                : "cancelled",
             progress: task.status === "completed" ? 100 : v.deepAnalysis.progress,
             resultPath: task.result ?? v.deepAnalysis.resultPath,
             error: task.error ?? v.deepAnalysis.error,
