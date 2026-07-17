@@ -1,5 +1,6 @@
 // 任务队列相关命令
 
+use crate::commands::deep_video::abort_deep_video_task;
 use crate::data::task_queue::{QueueStats, Task, TaskQueue, TaskStatus, TaskType};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
@@ -154,11 +155,14 @@ pub async fn resume_task(task_id: String) -> Result<(), String> {
 
 /// 取消任务
 #[tauri::command]
-pub async fn cancel_task(task_id: String) -> Result<(), String> {
+pub async fn cancel_task(app: AppHandle, task_id: String) -> Result<(), String> {
     TASK_QUEUE
         .cancel_task(&task_id)
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    abort_deep_video_task(&task_id);
+    emit_task_cancelled(&app, &task_id);
+    Ok(())
 }
 
 /// 获取任务状态
@@ -269,6 +273,15 @@ pub fn emit_task_failed(app: &AppHandle, task_id: &str, error: &str) {
 }
 
 /// 获取全局任务队列实例（供其他模块使用）
+pub fn emit_task_cancelled(app: &AppHandle, task_id: &str) {
+    let _ = app.emit(
+        "task-cancelled",
+        serde_json::json!({
+            "task_id": task_id,
+        }),
+    );
+}
+
 pub fn get_task_queue() -> &'static TaskQueue {
     &TASK_QUEUE
 }

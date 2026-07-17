@@ -107,7 +107,7 @@ function TaskCard({ task, onPause, onResume, onCancel }: {
           
           {isActive && (
             <div className="flex items-center gap-2">
-              {task.status === 'running' && onPause && (
+              {task.status === 'running' && task.task_type !== 'deep_video_analysis' && onPause && (
                 <Button variant="ghost" size="icon" onClick={onPause}>
                   <Pause className="h-4 w-4" />
                 </Button>

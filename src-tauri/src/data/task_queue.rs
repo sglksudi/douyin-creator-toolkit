@@ -494,7 +494,10 @@ impl TaskQueue {
 
     /// 清空所有待处理任务
     pub async fn clear_pending(&self) {
-        self.tasks.write().await.clear();
+        self.tasks
+            .write()
+            .await
+            .retain(|task| !matches!(task.status, TaskStatus::Pending));
     }
 
     /// 添加到历史记录
@@ -636,5 +639,40 @@ mod tests {
 
         let status = queue.get_task_status(&id).await;
         assert_eq!(status, Some(TaskStatus::Cancelled));
+    }
+
+    #[tokio::test]
+    async fn clear_pending_keeps_id_started_tasks() {
+        let queue = TaskQueue::new();
+        let running = queue
+            .add_task(TaskType::AiAnalysis {
+                content: "running".to_string(),
+                video_id: "running".to_string(),
+            })
+            .await;
+        let pending = queue
+            .add_task(TaskType::AiAnalysis {
+                content: "pending".to_string(),
+                video_id: "pending".to_string(),
+            })
+            .await;
+        queue.start_task_by_id(&running).await.unwrap();
+        queue.clear_pending().await;
+        assert!(queue.get_task(&running).await.is_some());
+        assert!(queue.get_task(&pending).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn id_started_task_persists_progress() {
+        let queue = TaskQueue::new();
+        let id = queue
+            .add_task(TaskType::AiAnalysis {
+                content: "progress".to_string(),
+                video_id: "progress".to_string(),
+            })
+            .await;
+        queue.start_task_by_id(&id).await.unwrap();
+        queue.update_task_progress_by_id(&id, 0.1).await;
+        assert_eq!(queue.get_task(&id).await.unwrap().progress, 0.1);
     }
 }

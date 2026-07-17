@@ -6,7 +6,23 @@ use crate::deep_video::runner::run_deep_video_analysis;
 use crate::deep_video::types::{
     DeepVideoAnalysisRequest, DeepVideoAnalysisResult, DeepVideoSource,
 };
+use futures_util::future::{AbortHandle, Abortable};
+use once_cell::sync::Lazy;
+use parking_lot::Mutex;
+use std::collections::HashMap;
 use tauri::AppHandle;
+
+static DEEP_VIDEO_ABORT_HANDLES: Lazy<Mutex<HashMap<String, AbortHandle>>> =
+    Lazy::new(|| Mutex::new(HashMap::new()));
+
+pub fn abort_deep_video_task(task_id: &str) -> bool {
+    if let Some(handle) = DEEP_VIDEO_ABORT_HANDLES.lock().remove(task_id) {
+        handle.abort();
+        return true;
+    }
+
+    false
+}
 
 #[tauri::command]
 pub async fn start_deep_video_analysis(
@@ -48,32 +64,61 @@ pub async fn start_deep_video_analysis(
 
     let mut request = request;
     request.task_id = Some(task_id.clone());
+    let (abort_handle, abort_registration) = AbortHandle::new_pair();
+    DEEP_VIDEO_ABORT_HANDLES
+        .lock()
+        .insert(task_id.clone(), abort_handle);
     let app_for_task = app.clone();
     let task_id_for_task = task_id.clone();
 
     tauri::async_runtime::spawn(async move {
-        emit_task_progress(&app_for_task, &task_id_for_task, 0.1, "running");
-        get_task_queue()
+        if get_task_queue()
             .start_task_by_id(&task_id_for_task)
             .await
-            .ok();
-
-        match run_deep_video_analysis(request).await {
-            Ok(result) => {
-                let result_path = result.artifacts.result_json.clone();
-                get_task_queue()
-                    .complete_task_by_id(&task_id_for_task, Some(result_path.clone()))
-                    .await;
-                emit_task_progress(&app_for_task, &task_id_for_task, 1.0, "completed");
-                emit_task_completed(&app_for_task, &task_id_for_task, Some(&result_path));
-            }
-            Err(error) => {
-                get_task_queue()
-                    .fail_task_by_id(&task_id_for_task, error.clone())
-                    .await;
-                emit_task_failed(&app_for_task, &task_id_for_task, &error);
-            }
+            .is_err()
+        {
+            DEEP_VIDEO_ABORT_HANDLES.lock().remove(&task_id_for_task);
+            return;
         }
+
+        if !matches!(
+            get_task_queue().get_task_status(&task_id_for_task).await,
+            Some(crate::data::task_queue::TaskStatus::Running)
+        ) {
+            DEEP_VIDEO_ABORT_HANDLES.lock().remove(&task_id_for_task);
+            return;
+        }
+
+        get_task_queue()
+            .update_task_progress_by_id(&task_id_for_task, 0.1)
+            .await;
+        emit_task_progress(&app_for_task, &task_id_for_task, 0.1, "running");
+
+        match Abortable::new(run_deep_video_analysis(request), abort_registration).await {
+            Ok(Ok(result)) => {
+                let result_path = result.artifacts.result_json.clone();
+                if get_task_queue()
+                    .complete_task_by_id(&task_id_for_task, Some(result_path.clone()))
+                    .await
+                    .is_some()
+                {
+                    emit_task_progress(&app_for_task, &task_id_for_task, 1.0, "completed");
+                    emit_task_completed(&app_for_task, &task_id_for_task, Some(&result_path));
+                }
+            }
+            Ok(Err(error)) => {
+                if get_task_queue()
+                    .fail_task_by_id(&task_id_for_task, error.clone())
+                    .await
+                    .is_some()
+                {
+                    emit_task_failed(&app_for_task, &task_id_for_task, &error);
+                }
+            }
+            Err(_) => {}
+        }
+
+        DEEP_VIDEO_ABORT_HANDLES.lock().remove(&task_id_for_task);
     });
 
     Ok(task_id)
