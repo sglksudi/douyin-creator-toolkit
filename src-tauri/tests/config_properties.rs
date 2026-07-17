@@ -118,6 +118,7 @@ fn app_config_strategy() -> impl Strategy<Value = AppConfig> {
                     openai_api_key,
                     deepseek_api_key,
                     lm_studio_url,
+                    custom_api_providers: Vec::new(),
                     request_interval,
                     max_retries,
                 }
@@ -243,6 +244,7 @@ mod tests {
             openai_api_key: None,
             deepseek_api_key: None,
             lm_studio_url: "http://localhost:8080".to_string(),
+            custom_api_providers: Vec::new(),
             request_interval: 2000,
             max_retries: 5,
         };
