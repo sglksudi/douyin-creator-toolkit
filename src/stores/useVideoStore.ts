@@ -318,7 +318,10 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
   },
 
   setupProgressListener: async () => {
-    const unlistenVideoProgress = await listen<ProcessProgress>("video-process-progress", (event) => {
+    const cleanups: Array<() => void> = [];
+
+    try {
+      const unlistenVideoProgress = await listen<ProcessProgress>("video-process-progress", (event) => {
       const progress = event.payload;
 
       set((state) => ({
@@ -332,9 +335,10 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             : v
         ),
       }));
-    });
+      });
+      cleanups.push(unlistenVideoProgress);
 
-    const unlistenTaskProgress = await listen<TaskProgressEvent>("task-progress", (event) => {
+      const unlistenTaskProgress = await listen<TaskProgressEvent>("task-progress", (event) => {
       const progress = event.payload;
 
       set((state) => ({
@@ -355,9 +359,10 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             : v
         ),
       }));
-    });
+      });
+      cleanups.push(unlistenTaskProgress);
 
-    const unlistenTaskCompleted = await listen<TaskCompletedEvent>("task-completed", (event) => {
+      const unlistenTaskCompleted = await listen<TaskCompletedEvent>("task-completed", (event) => {
       const completed = event.payload;
 
       set((state) => ({
@@ -375,9 +380,10 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             : v
         ),
       }));
-    });
+      });
+      cleanups.push(unlistenTaskCompleted);
 
-    const unlistenTaskFailed = await listen<TaskFailedEvent>("task-failed", (event) => {
+      const unlistenTaskFailed = await listen<TaskFailedEvent>("task-failed", (event) => {
       const failed = event.payload;
 
       set((state) => ({
@@ -394,9 +400,10 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             : v
         ),
       }));
-    });
+      });
+      cleanups.push(unlistenTaskFailed);
 
-    const unlistenTaskCancelled = await listen<TaskCancelledEvent>("task-cancelled", (event) => {
+      const unlistenTaskCancelled = await listen<TaskCancelledEvent>("task-cancelled", (event) => {
       const cancelled = event.payload;
 
       set((state) => ({
@@ -412,25 +419,26 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
             : v
         ),
       }));
-    });
+      });
+      cleanups.push(unlistenTaskCancelled);
 
-    await Promise.all(
-      get().videos
-        .filter((video) => video.deepAnalysis?.status === "running" && video.deepAnalysis.taskId)
-        .map((video) => reconcileDeepAnalysisTask(
-          video.id,
-          video.deepAnalysis!.taskId!,
-          Boolean(video.deepAnalysis!.useFrameAnalysis)
-        ))
-    );
+      await Promise.all(
+        get().videos
+          .filter((video) => video.deepAnalysis?.status === "running" && video.deepAnalysis.taskId)
+          .map((video) => reconcileDeepAnalysisTask(
+            video.id,
+            video.deepAnalysis!.taskId!,
+            Boolean(video.deepAnalysis!.useFrameAnalysis)
+          ))
+      );
 
-    return () => {
-      unlistenVideoProgress();
-      unlistenTaskProgress();
-      unlistenTaskCompleted();
-      unlistenTaskFailed();
-      unlistenTaskCancelled();
-    };
+      return () => {
+        cleanups.forEach((cleanup) => cleanup());
+      };
+    } catch (error) {
+      cleanups.forEach((cleanup) => cleanup());
+      throw error;
+    }
   },
 
   exportToDocx: async (outputPath: string) => {

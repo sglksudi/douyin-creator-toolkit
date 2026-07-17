@@ -446,7 +446,10 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
   },
 
   setupProgressListener: async () => {
-    const unlistenParseProgress = await listen<ParseProgressEvent>(
+    const cleanups: Array<() => void> = [];
+
+    try {
+      const unlistenParseProgress = await listen<ParseProgressEvent>(
       "mcp:parse-progress",
       (event) => {
         const progress = event.payload;
@@ -461,9 +464,10 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
           ),
         }));
       }
-    );
+      );
+      cleanups.push(unlistenParseProgress);
 
-    const unlistenTaskProgress = await listen<TaskProgressEvent>("task-progress", (event) => {
+      const unlistenTaskProgress = await listen<TaskProgressEvent>("task-progress", (event) => {
       const progress = event.payload;
 
       set((state) => ({
@@ -484,9 +488,10 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
             : l
         ),
       }));
-    });
+      });
+      cleanups.push(unlistenTaskProgress);
 
-    const unlistenTaskCompleted = await listen<TaskCompletedEvent>("task-completed", (event) => {
+      const unlistenTaskCompleted = await listen<TaskCompletedEvent>("task-completed", (event) => {
       const completed = event.payload;
 
       set((state) => ({
@@ -504,9 +509,10 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
             : l
         ),
       }));
-    });
+      });
+      cleanups.push(unlistenTaskCompleted);
 
-    const unlistenTaskFailed = await listen<TaskFailedEvent>("task-failed", (event) => {
+      const unlistenTaskFailed = await listen<TaskFailedEvent>("task-failed", (event) => {
       const failed = event.payload;
 
       set((state) => ({
@@ -523,9 +529,10 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
             : l
         ),
       }));
-    });
+      });
+      cleanups.push(unlistenTaskFailed);
 
-    const unlistenTaskCancelled = await listen<TaskCancelledEvent>("task-cancelled", (event) => {
+      const unlistenTaskCancelled = await listen<TaskCancelledEvent>("task-cancelled", (event) => {
       const cancelled = event.payload;
 
       set((state) => ({
@@ -541,25 +548,26 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
             : l
         ),
       }));
-    });
+      });
+      cleanups.push(unlistenTaskCancelled);
 
-    await Promise.all(
-      get().links
-        .filter((link) => link.deepAnalysis?.status === "running" && link.deepAnalysis.taskId)
-        .map((link) => reconcileDeepAnalysisTask(
-          link.id,
-          link.deepAnalysis!.taskId!,
-          Boolean(link.deepAnalysis!.useFrameAnalysis)
-        ))
-    );
+      await Promise.all(
+        get().links
+          .filter((link) => link.deepAnalysis?.status === "running" && link.deepAnalysis.taskId)
+          .map((link) => reconcileDeepAnalysisTask(
+            link.id,
+            link.deepAnalysis!.taskId!,
+            Boolean(link.deepAnalysis!.useFrameAnalysis)
+          ))
+      );
 
-    return () => {
-      unlistenParseProgress();
-      unlistenTaskProgress();
-      unlistenTaskCompleted();
-      unlistenTaskFailed();
-      unlistenTaskCancelled();
-    };
+      return () => {
+        cleanups.forEach((cleanup) => cleanup());
+      };
+    } catch (error) {
+      cleanups.forEach((cleanup) => cleanup());
+      throw error;
+    }
   },
 
   getSuccessfulLinks: () => {
