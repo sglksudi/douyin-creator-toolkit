@@ -224,6 +224,7 @@ pub async fn update_ai_settings(settings: AiSettings) -> Result<(), String> {
 
 pub(crate) fn apply_ai_settings(service: &mut AiService, settings: AiSettings) {
     service.set_custom_api_providers(settings.custom_api_providers);
+    service.selected_custom_api_id = None;
     service.set_provider_from_key(settings.provider);
     service.doubao_api_key = settings.doubao_api_key.filter(|key| !key.trim().is_empty());
     service.openai_api_key = settings.openai_api_key.filter(|key| !key.trim().is_empty());
@@ -706,5 +707,48 @@ mod tests {
         assert_eq!(service.doubao_api_key, None);
         assert_eq!(service.openai_api_key, None);
         assert_eq!(service.deepseek_api_key, None);
+    }
+
+    #[test]
+    fn applying_generic_custom_settings_clears_selected_custom_provider() {
+        let mut service = AiService::new();
+        service.set_provider_from_key("custom:old".into());
+        let providers = vec![CustomApiProviderConfig {
+            id: "new".into(),
+            name: "New Provider".into(),
+            base_url: "https://new.example.com/v1".into(),
+            model: "new-model".into(),
+            api_key: None,
+        }];
+
+        apply_ai_settings(
+            &mut service,
+            AiSettings {
+                provider: "custom".into(),
+                lm_studio_url: "http://new.example.com".into(),
+                custom_api_providers: providers.clone(),
+                ..AiSettings::default()
+            },
+        );
+
+        assert_eq!(service.selected_custom_api_id, None);
+        assert_eq!(service.custom_api_providers, providers);
+        assert_eq!(service.lm_studio_url, "http://new.example.com");
+    }
+
+    #[test]
+    fn applying_named_custom_settings_selects_the_new_provider() {
+        let mut service = AiService::new();
+        service.set_provider_from_key("custom:old".into());
+
+        apply_ai_settings(
+            &mut service,
+            AiSettings {
+                provider: "custom:new".into(),
+                ..AiSettings::default()
+            },
+        );
+
+        assert_eq!(service.selected_custom_api_id.as_deref(), Some("new"));
     }
 }
