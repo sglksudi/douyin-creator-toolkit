@@ -595,7 +595,46 @@ impl CustomApiProvider {
             .header("Content-Type", "application/json")
             .timeout(std::time::Duration::from_secs(10));
         let response = self.with_auth(request).send().await?;
-        Ok(response.status().is_success())
+
+        if response.status().is_success() {
+            return Ok(true);
+        }
+
+        if response.status().as_u16() == 401 {
+            return Err(AiError::InvalidApiKey);
+        }
+
+        self.chat_ping_available().await
+    }
+
+    async fn chat_ping_available(&self) -> Result<bool, AiError> {
+        let request = ChatRequest {
+            model: self.config.model.clone(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: "ping".to_string(),
+            }],
+            temperature: 0.0,
+        };
+
+        let request_builder = self
+            .client
+            .post(self.chat_completions_url())
+            .header("Content-Type", "application/json")
+            .timeout(std::time::Duration::from_secs(10))
+            .json(&request);
+        let response = self.with_auth(request_builder).send().await?;
+
+        if !response.status().is_success() {
+            return Ok(false);
+        }
+
+        let chat_response: ChatResponse = response
+            .json()
+            .await
+            .map_err(|e| AiError::ParseError(e.to_string()))?;
+
+        Ok(chat_response.choices.first().is_some())
     }
 
     pub async fn analyze(&self, content: &str, context: &str) -> Result<AnalysisResult, AiError> {
@@ -754,6 +793,10 @@ fn extract_json(content: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
 
     fn custom_config(base_url: &str) -> CustomApiProviderConfig {
         CustomApiProviderConfig {
@@ -763,6 +806,65 @@ mod tests {
             model: "Qwen/Qwen3-235B-A22B".to_string(),
             api_key: Some("sk-test".to_string()),
         }
+    }
+
+    fn openai_chat_response() -> &'static str {
+        r#"{"choices":[{"message":{"role":"assistant","content":"pong"}}]}"#
+    }
+
+    fn start_test_server(responses: Vec<(u16, &'static str)>) -> (String, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let addr = listener.local_addr().expect("read test server address");
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let recorded_requests = Arc::clone(&requests);
+
+        thread::spawn(move || {
+            for (status, body) in responses {
+                let (mut stream, _) = listener.accept().expect("accept request");
+                let mut buffer = [0_u8; 1024];
+                let mut request = Vec::new();
+
+                loop {
+                    let read = stream.read(&mut buffer).expect("read request");
+                    if read == 0 {
+                        break;
+                    }
+                    request.extend_from_slice(&buffer[..read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+
+                let request_text = String::from_utf8_lossy(&request);
+                let path = request_text
+                    .lines()
+                    .next()
+                    .and_then(|line| line.split_whitespace().nth(1))
+                    .unwrap_or("")
+                    .to_string();
+                recorded_requests.lock().unwrap().push(path);
+
+                let reason = match status {
+                    200 => "OK",
+                    401 => "Unauthorized",
+                    404 => "Not Found",
+                    500 => "Internal Server Error",
+                    _ => "Test Response",
+                };
+                let response = format!(
+                    "HTTP/1.1 {} {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    status,
+                    reason,
+                    body.len(),
+                    body
+                );
+                stream
+                    .write_all(response.as_bytes())
+                    .expect("write response");
+            }
+        });
+
+        (format!("http://{}", addr), requests)
     }
 
     #[test]
@@ -794,6 +896,62 @@ mod tests {
         service.set_provider_from_key("custom:silicon-flow".to_string());
 
         assert_eq!(service.provider_key(), "custom:silicon-flow");
+    }
+
+    #[tokio::test]
+    async fn custom_provider_health_uses_models_when_available() {
+        let (base_url, requests) = start_test_server(vec![(200, r#"{"data":[]}"#)]);
+        let provider = CustomApiProvider::new(custom_config(&base_url));
+
+        let available = provider.is_available().await.expect("health check");
+
+        assert!(available);
+        assert_eq!(requests.lock().unwrap().as_slice(), ["/models"]);
+    }
+
+    #[tokio::test]
+    async fn custom_provider_health_falls_back_to_chat_when_models_missing() {
+        let (base_url, requests) = start_test_server(vec![
+            (404, r#"{"error":"missing"}"#),
+            (200, openai_chat_response()),
+        ]);
+        let provider = CustomApiProvider::new(custom_config(&base_url));
+
+        let available = provider.is_available().await.expect("health check");
+
+        assert!(available);
+        assert_eq!(
+            requests.lock().unwrap().as_slice(),
+            ["/models", "/chat/completions"]
+        );
+    }
+
+    #[tokio::test]
+    async fn custom_provider_health_does_not_fallback_on_unauthorized_models() {
+        let (base_url, requests) = start_test_server(vec![(401, r#"{"error":"unauthorized"}"#)]);
+        let provider = CustomApiProvider::new(custom_config(&base_url));
+
+        let result = provider.is_available().await;
+
+        assert!(matches!(result, Err(AiError::InvalidApiKey)));
+        assert_eq!(requests.lock().unwrap().as_slice(), ["/models"]);
+    }
+
+    #[tokio::test]
+    async fn custom_provider_health_returns_false_when_chat_ping_fails() {
+        let (base_url, requests) = start_test_server(vec![
+            (404, r#"{"error":"missing"}"#),
+            (500, r#"{"error":"down"}"#),
+        ]);
+        let provider = CustomApiProvider::new(custom_config(&base_url));
+
+        let available = provider.is_available().await.expect("health check");
+
+        assert!(!available);
+        assert_eq!(
+            requests.lock().unwrap().as_slice(),
+            ["/models", "/chat/completions"]
+        );
     }
 }
 
