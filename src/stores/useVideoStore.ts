@@ -70,6 +70,7 @@ export interface VideoItem extends VideoInfo {
   transcript?: string;
   error?: string;
   expanded?: boolean;
+  useFrameAnalysis?: boolean;
   // AI 分析相关
   analysis?: AnalysisResult;
   analysisStatus?: "idle" | "analyzing" | "completed" | "failed";
@@ -143,6 +144,7 @@ interface VideoStore {
   removeVideo: (id: string) => void;
   clearVideos: () => void;
   toggleExpanded: (id: string) => void;
+  setUseFrameAnalysis: (id: string, enabled: boolean) => void;
 
   // Processing
   processVideo: (id: string) => Promise<void>;
@@ -180,6 +182,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
         progress: 0,
         stage: "",
         expanded: false,
+        useFrameAnalysis: false,
       }));
 
       set((state) => ({
@@ -206,6 +209,14 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
     set((state) => ({
       videos: state.videos.map((v) =>
         v.id === id ? { ...v, expanded: !v.expanded } : v
+      ),
+    }));
+  },
+
+  setUseFrameAnalysis: (id: string, enabled: boolean) => {
+    set((state) => ({
+      videos: state.videos.map((v) =>
+        v.id === id ? { ...v, useFrameAnalysis: enabled } : v
       ),
     }));
   },

@@ -311,7 +311,7 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
           set(state => ({
             links: state.links.map(l =>
               l.id === linkId
-                ? { ...l, error: `Transcript extraction failed: ${e}` }
+                ? { ...l, status: "failed" as const, error: `Transcript extraction failed: ${e}` }
                 : l
             )
           }));
