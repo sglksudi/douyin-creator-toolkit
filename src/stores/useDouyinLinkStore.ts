@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { buildDouyinDeepAnalysisRequest } from "./deepVideoRequest";
 
 export interface DouyinVideoInfo {
   video_url: string;
@@ -354,9 +355,11 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
     if (!link || !link.transcript) return;
     if (link.deepAnalysis?.status === "running") return;
 
-    if (useFrameAnalysis && !link.localVideoPath) {
-      throw new Error("Frame evidence requires a cached local video. Re-extract the link transcript first.");
-    }
+    const request = buildDouyinDeepAnalysisRequest(
+      { ...link, transcript: link.transcript },
+      profile,
+      useFrameAnalysis
+    );
 
     set((state) => ({
       links: state.links.map((l) =>
@@ -372,29 +375,7 @@ export const useDouyinLinkStore = create<DouyinLinkStore>((set, get) => ({
 
     try {
       const taskId = await invoke<string>("start_deep_video_analysis", {
-        request: {
-          source: useFrameAnalysis
-            ? {
-              downloaded_douyin_video: {
-                video_path: link.localVideoPath,
-                source_url: link.url,
-              },
-            }
-            : {
-              text_only: {
-                source_url: link.url,
-              },
-            },
-          task_id: link.id,
-          title: link.videoInfo?.title || link.url,
-          profile,
-          use_frame_analysis: useFrameAnalysis,
-          transcript: { text: link.transcript, segments: [] },
-          ocr_items: [],
-          reference_text: link.videoInfo
-            ? `Author: ${link.videoInfo.author}\nLikes: ${link.videoInfo.likes}\nComments: ${link.videoInfo.comments}\nShares: ${link.videoInfo.shares}`
-            : null,
-        },
+        request,
       });
 
       set((state) => ({

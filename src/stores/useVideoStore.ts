@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { buildLocalVideoDeepAnalysisRequest } from "./deepVideoRequest";
 
 export interface VideoInfo {
   id: string;
@@ -556,18 +557,7 @@ export const useVideoStore = create<VideoStore>((set, get) => ({
 
     try {
       const taskId = await invoke<string>("start_deep_video_analysis", {
-        request: {
-          source: { local_video: { video_path: video.path } },
-          task_id: video.id,
-          title: video.name,
-          profile,
-          use_frame_analysis: useFrameAnalysis,
-          transcript: video.transcript
-            ? { text: video.transcript, segments: [] }
-            : null,
-          ocr_items: [],
-          reference_text: null,
-        },
+        request: buildLocalVideoDeepAnalysisRequest(video, profile, useFrameAnalysis),
       });
 
       set((state) => ({
