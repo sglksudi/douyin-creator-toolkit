@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "smoke": "tsc --noEmit && cargo test --manifest-path src-tauri/Cargo.toml --test deep_video_smoke",
     "preview": "vite preview",
     "tauri": "tauri"
   },
