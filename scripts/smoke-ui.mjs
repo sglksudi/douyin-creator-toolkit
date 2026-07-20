@@ -40,8 +40,11 @@ const douyinLink = read(files.douyinLink);
 assertContains(app, "register(useVideoStore.getState().setupProgressListener)", "App video listener");
 assertContains(app, "register(useDouyinLinkStore.getState().setupProgressListener)", "App Douyin listener");
 assertContains(app, "setActiveTab(\"tasks\")", "Tray task navigation");
+assertContains(app, "case \"settings\"", "App Settings route");
 assertContains(app, "default:", "App default route fallback");
 assertContains(app, "return <LocalVideo />", "App default LocalVideo fallback");
+assertContains(app, "return <Settings />", "App Settings route render");
+assertContains(sidebar, "onTabChange(\"settings\")", "Sidebar Settings footer navigation");
 
 assertContains(localVideo, "setUseFrameAnalysis(video.id, enabled)", "LocalVideo frame evidence switch");
 assertContains(localVideo, "startDeepAnalysis(video.id, deepProfile, Boolean(video.useFrameAnalysis))", "LocalVideo deep analysis action");

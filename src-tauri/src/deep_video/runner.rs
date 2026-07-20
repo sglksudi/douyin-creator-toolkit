@@ -1,4 +1,7 @@
-use crate::deep_video::artifacts::{create_artifact_paths, write_json, write_text};
+use crate::deep_video::artifacts::{
+    create_artifact_paths, create_artifact_paths_from_root, write_json, write_text,
+    DeepVideoArtifactPaths,
+};
 use crate::deep_video::candidate_mining::mine_candidate_segments;
 use crate::deep_video::contact_sheet::generate_contact_sheet;
 use crate::deep_video::evidence_timeline::build_evidence_timeline;
@@ -8,7 +11,7 @@ use crate::deep_video::types::{
     CandidateSegment, DeepVideoAnalysisRequest, DeepVideoAnalysisResult, DeepVideoArtifacts,
     DeepVideoSource, EvidenceFrame, EvidenceSheet,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub async fn run_deep_video_analysis(
     request: DeepVideoAnalysisRequest,
@@ -18,6 +21,26 @@ pub async fn run_deep_video_analysis(
         .clone()
         .unwrap_or_else(|| format!("deep-video-{}", chrono::Utc::now().timestamp_millis()));
     let paths = create_artifact_paths(&task_id)?;
+    run_deep_video_analysis_with_paths(request, task_id, paths).await
+}
+
+pub async fn run_deep_video_analysis_with_artifact_root(
+    request: DeepVideoAnalysisRequest,
+    artifact_root: &Path,
+) -> Result<DeepVideoAnalysisResult, String> {
+    let task_id = request
+        .task_id
+        .clone()
+        .unwrap_or_else(|| format!("deep-video-{}", chrono::Utc::now().timestamp_millis()));
+    let paths = create_artifact_paths_from_root(artifact_root, &task_id)?;
+    run_deep_video_analysis_with_paths(request, task_id, paths).await
+}
+
+async fn run_deep_video_analysis_with_paths(
+    request: DeepVideoAnalysisRequest,
+    task_id: String,
+    paths: DeepVideoArtifactPaths,
+) -> Result<DeepVideoAnalysisResult, String> {
     let candidates = mine_candidate_segments(
         request.transcript.as_ref(),
         &request.ocr_items,
@@ -183,6 +206,7 @@ mod tests {
 
     #[tokio::test]
     async fn text_only_analysis_does_not_require_existing_video_source() {
+        let artifact_root = tempfile::tempdir().unwrap();
         let request = DeepVideoAnalysisRequest {
             source: DeepVideoSource::LocalVideo {
                 video_path: "C:/tmp/does-not-exist/text-only.mp4".to_string(),
@@ -206,7 +230,9 @@ mod tests {
             reference_text: None,
         };
 
-        let result = run_deep_video_analysis(request).await.unwrap();
+        let result = run_deep_video_analysis_with_artifact_root(request, artifact_root.path())
+            .await
+            .unwrap();
 
         assert!(result.frames.is_empty());
         assert!(result.evidence_sheet.is_none());

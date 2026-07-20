@@ -41,7 +41,14 @@ impl DeepVideoArtifactPaths {
 
 pub fn create_artifact_paths(task_id: &str) -> Result<DeepVideoArtifactPaths, String> {
     let paths = get_app_paths().map_err(|error| error.to_string())?;
-    let artifact_paths = DeepVideoArtifactPaths::from_root(&paths.data_dir, task_id);
+    create_artifact_paths_from_root(&paths.data_dir, task_id)
+}
+
+pub fn create_artifact_paths_from_root(
+    root: &Path,
+    task_id: &str,
+) -> Result<DeepVideoArtifactPaths, String> {
+    let artifact_paths = DeepVideoArtifactPaths::from_root(root, task_id);
     artifact_paths.ensure_dirs()?;
     Ok(artifact_paths)
 }
