@@ -113,6 +113,7 @@ windows-dpapi = "0.1"
 # 属性测试
 proptest = "1"
 tempfile = "3"
+tauri = { version = "2", features = ["test", "tray-icon"] }
 
 # Release 构建优化
 [profile.release]

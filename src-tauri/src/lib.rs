@@ -10,6 +10,7 @@ pub mod utils;
 
 use tauri::Emitter;
 use tauri::Manager;
+use tauri::Runtime;
 
 /// 示例命令 - 用于测试
 #[tauri::command]
@@ -53,11 +54,27 @@ pub fn run() {
         }
     }
 
-    let app = tauri::Builder::default()
+    let app = build_runtime_app(tauri::Builder::default())
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::ExitRequested { .. } = event {
+            core::sidecar_manager::cleanup_sidecars(app_handle);
+        }
+    });
+}
+
+pub fn build_app_shell<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
+    builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
+}
+
+fn build_runtime_app(builder: tauri::Builder<tauri::Wry>) -> tauri::Builder<tauri::Wry> {
+    build_app_shell(builder)
         .setup(|app| {
             commands::settings::init_data_layer().map_err(|e| {
                 let err = std::io::Error::new(std::io::ErrorKind::Other, e);
@@ -219,12 +236,4 @@ pub fn run() {
             commands::tray::send_notification,
             commands::tray::update_tray_tooltip,
         ])
-        .build(tauri::generate_context!())
-        .expect("error while building tauri application");
-
-    app.run(|app_handle, event| {
-        if let tauri::RunEvent::ExitRequested { .. } = event {
-            core::sidecar_manager::cleanup_sidecars(app_handle);
-        }
-    });
 }
