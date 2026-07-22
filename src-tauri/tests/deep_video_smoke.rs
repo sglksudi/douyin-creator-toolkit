@@ -1,9 +1,10 @@
 use douyin_creator_tools_lib::deep_video::runner::run_deep_video_analysis_with_artifact_root;
 use douyin_creator_tools_lib::deep_video::types::{
-    AnalysisProfile, DeepVideoAnalysisRequest, DeepVideoSource, EvidenceKind, TranscriptInput,
-    TranscriptSegment,
+    AnalysisProfile, AnalysisProfileOptions, DeepVideoAnalysisRequest, DeepVideoSource,
+    EvidenceKind, TranscriptInput, TranscriptSegment,
 };
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn transcript_fixture() -> TranscriptInput {
     TranscriptInput {
@@ -95,4 +96,117 @@ async fn frame_evidence_smoke_requires_existing_video_source() {
         .unwrap_err();
 
     assert!(error.contains("Video source does not exist"));
+}
+
+#[tokio::test]
+#[ignore = "requires a local FFmpeg/FFprobe pair under src-tauri/resources/ffmpeg"]
+async fn local_video_frame_evidence_smoke_writes_visual_artifacts() {
+    std::env::set_current_dir(env!("CARGO_MANIFEST_DIR")).unwrap();
+
+    let artifact_root = local_smoke_root();
+    std::fs::create_dir_all(&artifact_root).unwrap();
+    let video_path = artifact_root.join("sample-local-video.mp4");
+    generate_sample_video(&video_path);
+
+    let task_id = format!(
+        "smoke-local-video-{}",
+        chrono::Utc::now().timestamp_millis()
+    );
+    let request = DeepVideoAnalysisRequest {
+        source: DeepVideoSource::LocalVideo {
+            video_path: video_path.to_string_lossy().to_string(),
+        },
+        task_id: Some(task_id),
+        title: "sample local video".to_string(),
+        profile: AnalysisProfile::Custom(AnalysisProfileOptions {
+            max_frames: 4,
+            interval_seconds: 1.0,
+            candidate_window_seconds: 4.0,
+            frames_per_candidate: 1,
+            use_scene_boundaries: false,
+            vision_passes: 0,
+        }),
+        use_frame_analysis: true,
+        transcript: Some(transcript_fixture()),
+        ocr_items: Vec::new(),
+        reference_text: Some("Author: Local Smoke\nLikes: 12\nComments: 3\nShares: 1".to_string()),
+    };
+
+    let result = run_smoke_request(request, &artifact_root).await.unwrap();
+
+    assert_eq!(
+        result.source_video_path.as_deref(),
+        Some(video_path.to_string_lossy().as_ref())
+    );
+    assert!(result.frames.len() >= 3);
+    assert!(result
+        .timeline
+        .iter()
+        .any(|item| item.kind == EvidenceKind::Frame));
+    assert!(result.evidence_sheet.is_some());
+    assert!(result.artifacts.evidence_sheet_jpg.is_some());
+    assert!(result.report_markdown.contains("contact sheet"));
+    assert!(result.report_markdown.contains("frame IDs"));
+
+    for artifact in [
+        &result.artifacts.request_json,
+        &result.artifacts.frame_result_json,
+        &result.artifacts.candidate_segments_json,
+        &result.artifacts.evidence_timeline_json,
+        &result.artifacts.result_json,
+        &result.artifacts.report_md,
+    ] {
+        assert!(
+            Path::new(artifact).exists(),
+            "artifact should exist: {artifact}"
+        );
+        assert_path_stays_under(artifact, &artifact_root);
+    }
+
+    let sheet_path = result.artifacts.evidence_sheet_jpg.as_ref().unwrap();
+    assert!(Path::new(sheet_path).exists());
+    assert_path_stays_under(sheet_path, &artifact_root);
+}
+
+fn local_smoke_root() -> PathBuf {
+    std::env::var_os("DEEP_VIDEO_LOCAL_SMOKE_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| std::env::temp_dir().join("douyin-creator-toolkit-local-video-smoke"))
+}
+
+fn generate_sample_video(video_path: &Path) {
+    let ffmpeg = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("resources")
+        .join("ffmpeg")
+        .join(if cfg!(windows) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        });
+    assert!(ffmpeg.exists(), "expected FFmpeg at {}", ffmpeg.display());
+
+    let status = Command::new(ffmpeg)
+        .args([
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            "testsrc2=size=320x180:rate=10:duration=3.2",
+            "-f",
+            "lavfi",
+            "-i",
+            "sine=frequency=880:duration=3.2",
+            "-shortest",
+            "-pix_fmt",
+            "yuv420p",
+            "-y",
+            video_path.to_str().unwrap(),
+        ])
+        .status()
+        .unwrap();
+
+    assert!(status.success(), "sample video generation should succeed");
+    assert!(video_path.exists());
 }
