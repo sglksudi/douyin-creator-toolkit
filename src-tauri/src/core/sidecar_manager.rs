@@ -18,6 +18,12 @@ pub const ASR_GPU_PORT: u16 = 38081;
 
 static SIDECAR_TOKEN: OnceCell<String> = OnceCell::new();
 
+#[derive(Debug, PartialEq, Eq)]
+enum AsrServiceStatus {
+    Healthy,
+    Unavailable,
+}
+
 pub struct SidecarState {
     pub child: Mutex<Option<Child>>,
     pub asr_gpu_child: Mutex<Option<Child>>,
@@ -45,7 +51,10 @@ pub fn init_sidecar(app: &AppHandle) {
     let download_root = std::env::temp_dir().join("douyin_creator_tools");
 
     if let Err(e) = std::fs::create_dir_all(&download_root) {
-        error!("[Sidecar] Failed to prepare download root {:?}: {}", download_root, e);
+        error!(
+            "[Sidecar] Failed to prepare download root {:?}: {}",
+            download_root, e
+        );
         return;
     }
 
@@ -221,6 +230,14 @@ fn runtime_search_dirs(resource_dir: &Path) -> Vec<PathBuf> {
 
 /// Start the GPU ASR sidecar service
 fn start_asr_gpu_server(python_path: &Path, resource_dir: &Path) -> Option<Child> {
+    if asr_service_status(ASR_GPU_PORT) == AsrServiceStatus::Healthy {
+        info!(
+            "[ASR-GPU] Reusing existing ASR service at http://127.0.0.1:{}",
+            ASR_GPU_PORT
+        );
+        return None;
+    }
+
     // Resolve the GPU ASR script path
     let asr_script_candidates = [
         resource_dir
@@ -296,6 +313,18 @@ fn start_asr_gpu_server(python_path: &Path, resource_dir: &Path) -> Option<Child
     }
 }
 
+fn asr_service_status(port: u16) -> AsrServiceStatus {
+    let url = format!("http://127.0.0.1:{port}/health");
+    let response = ureq::get(&url)
+        .timeout(std::time::Duration::from_secs(2))
+        .call();
+
+    match response {
+        Ok(response) if response.status() == 200 => AsrServiceStatus::Healthy,
+        _ => AsrServiceStatus::Unavailable,
+    }
+}
+
 pub fn cleanup_sidecars(app: &AppHandle) {
     let state = app.state::<SidecarState>();
     terminate_child(
@@ -318,7 +347,10 @@ fn terminate_child(child_slot: &mut Option<Child>, process_name: &str) {
 
     match child.try_wait() {
         Ok(Some(status)) => {
-            info!("[Sidecar] {} already exited with status {}", process_name, status);
+            info!(
+                "[Sidecar] {} already exited with status {}",
+                process_name, status
+            );
         }
         Ok(None) => {
             if let Err(e) = child.kill() {
@@ -334,4 +366,30 @@ fn terminate_child(child_slot: &mut Option<Child>, process_name: &str) {
     }
 
     *child_slot = None;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    #[test]
+    fn detects_existing_healthy_asr_service() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+
+        thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buffer = [0u8; 512];
+            let _ = stream.read(&mut buffer);
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 35\r\n\r\n{\"status\":\"ok\",\"service\":\"asr-gpu\"}",
+                )
+                .unwrap();
+        });
+
+        assert_eq!(asr_service_status(port), AsrServiceStatus::Healthy);
+    }
 }
