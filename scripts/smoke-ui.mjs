@@ -31,6 +31,10 @@ function assertCriticalNavigationPage({ route, render, navigation, content, page
   content.forEach((needle) => assertContains(page, needle, `Page content ${route}`));
 }
 
+function assertCriticalInteraction({ label, page, hooks }) {
+  hooks.forEach((needle) => assertContains(page, needle, `Interaction ${label}`));
+}
+
 const app = read(files.app);
 const sidebar = read(files.sidebar);
 const localVideo = read(files.localVideo);
@@ -80,6 +84,55 @@ const criticalNavigationPages = [
 ];
 
 criticalNavigationPages.forEach(assertCriticalNavigationPage);
+
+const criticalInteractionChecks = [
+  {
+    label: "LocalVideo frame evidence switch and deep analysis",
+    page: localVideo,
+    hooks: [
+      "onCheckedChange={(enabled) => setUseFrameAnalysis(video.id, enabled)}",
+      "aria-label=\"画面证据\"",
+      "disabled={!video.useFrameAnalysis}",
+      "onClick={() => handleDeepAnalyze(video)}",
+      "disabled={deepAnalyzingId === video.id || video.deepAnalysis?.status === \"running\"}",
+    ],
+  },
+  {
+    label: "DouyinLink frame evidence switch and deep analysis",
+    page: douyinLink,
+    hooks: [
+      "onCheckedChange={(checked) => setUseFrameAnalysis(link.id, checked)}",
+      "aria-label=\"画面证据\"",
+      "onClick={handleDeepAnalysis}",
+      "disabled={!link.transcript || link.deepAnalysis?.status === \"running\"}",
+      "description: link.useFrameAnalysis",
+    ],
+  },
+  {
+    label: "Settings custom API actions",
+    page: settings,
+    hooks: [
+      "onClick={addCustomApiProvider}",
+      "onClick={() => removeCustomApiProvider(provider.id)}",
+      "onClick={() => checkCustomApiProvider(selectedCustomApiProvider)}",
+      "disabled={customApiStatus[selectedCustomApiProvider.id] === \"checking\"}",
+      "title=\"删除自定义 API\"",
+    ],
+  },
+  {
+    label: "TaskHistory queue controls",
+    page: taskHistory,
+    hooks: [
+      "onClick={handleRefresh}",
+      "onClick={clearPending}",
+      "onClick={clearHistory}",
+      "onClick={() => setActiveTab('active')}",
+      "onClick={() => setActiveTab('history')}",
+    ],
+  },
+];
+
+criticalInteractionChecks.forEach(assertCriticalInteraction);
 
 assertContains(app, "register(useVideoStore.getState().setupProgressListener)", "App video listener");
 assertContains(app, "register(useDouyinLinkStore.getState().setupProgressListener)", "App Douyin listener");
