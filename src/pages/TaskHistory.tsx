@@ -1,10 +1,13 @@
 // 任务历史页面
 
 import { useEffect, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
+import { openPath, revealItemInDir } from '@tauri-apps/plugin-opener';
 import { useTaskStore, TaskInfo } from '../stores/useTaskStore';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Progress } from '../components/ui/progress';
+import { useToast } from '../hooks/useToast';
 import {
   ListTodo,
   Play,
@@ -20,7 +23,15 @@ import {
   Link,
   Download,
   Brain,
+  FileText,
+  FolderOpen,
 } from 'lucide-react';
+
+interface DeepVideoAnalysisResult {
+  artifacts: {
+    report_md: string;
+  };
+}
 
 // 任务类型图标映射
 const taskTypeIcons: Record<string, React.ReactNode> = {
@@ -60,11 +71,20 @@ const statusText: Record<string, string> = {
   cancelled: '已取消',
 };
 
-function TaskCard({ task, onPause, onResume, onCancel }: {
+function TaskCard({
+  task,
+  onPause,
+  onResume,
+  onCancel,
+  onOpenDeepVideoReport,
+  onRevealDeepVideoArtifacts,
+}: {
   task: TaskInfo;
   onPause?: () => void;
   onResume?: () => void;
   onCancel?: () => void;
+  onOpenDeepVideoReport?: (resultPath: string) => void;
+  onRevealDeepVideoArtifacts?: (resultPath: string) => void;
 }) {
   const formatTime = (timeStr: string | null) => {
     if (!timeStr) return '-';
@@ -105,8 +125,29 @@ function TaskCard({ task, onPause, onResume, onCancel }: {
             </div>
           </div>
           
-          {isActive && (
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
+            {task.task_type === 'deep_video_analysis' && task.result && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onOpenDeepVideoReport?.(task.result!)}
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  打开报告
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => onRevealDeepVideoArtifacts?.(task.result!)}
+                  title="定位产物"
+                >
+                  <FolderOpen className="h-4 w-4" />
+                </Button>
+              </>
+            )}
+            {isActive && (
+              <>
               {task.status === 'running' && task.task_type !== 'deep_video_analysis' && onPause && (
                 <Button variant="ghost" size="icon" onClick={onPause}>
                   <Pause className="h-4 w-4" />
@@ -122,8 +163,9 @@ function TaskCard({ task, onPause, onResume, onCancel }: {
                   <X className="h-4 w-4" />
                 </Button>
               )}
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
         
         {(task.status === 'running' || task.status === 'paused') && (
@@ -140,6 +182,7 @@ function TaskCard({ task, onPause, onResume, onCancel }: {
 }
 
 export default function TaskHistory() {
+  const { toast } = useToast();
   const {
     tasks,
     history,
@@ -172,6 +215,28 @@ export default function TaskHistory() {
     fetchTasks();
     fetchHistory();
     fetchStats();
+  };
+
+  const openDeepVideoReport = async (resultPath: string) => {
+    try {
+      const result = await invoke<DeepVideoAnalysisResult>('get_deep_video_result', { resultPath });
+      await openPath(result.artifacts.report_md);
+    } catch (error) {
+      toast({ title: '打开报告失败', description: String(error), variant: 'error' });
+    }
+  };
+
+  const revealDeepVideoArtifacts = async (resultPath: string) => {
+    try {
+      const result = await invoke<DeepVideoAnalysisResult>('get_deep_video_result', { resultPath });
+      await revealItemInDir(result.artifacts.report_md);
+    } catch (error) {
+      try {
+        await revealItemInDir(resultPath);
+      } catch {
+        toast({ title: '定位产物失败', description: String(error), variant: 'error' });
+      }
+    }
   };
 
   return (
@@ -277,6 +342,8 @@ export default function TaskHistory() {
                   onPause={() => pauseTask(task.id)}
                   onResume={() => resumeTask(task.id)}
                   onCancel={() => cancelTask(task.id)}
+                  onOpenDeepVideoReport={openDeepVideoReport}
+                  onRevealDeepVideoArtifacts={revealDeepVideoArtifacts}
                 />
               ))}
             </div>
@@ -302,7 +369,12 @@ export default function TaskHistory() {
           ) : (
             <div className="space-y-3">
               {history.map((task) => (
-                <TaskCard key={task.id} task={task} />
+                <TaskCard
+                  key={task.id}
+                  task={task}
+                  onOpenDeepVideoReport={openDeepVideoReport}
+                  onRevealDeepVideoArtifacts={revealDeepVideoArtifacts}
+                />
               ))}
             </div>
           )}

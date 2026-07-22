@@ -128,6 +128,9 @@ const criticalInteractionChecks = [
       "onClick={clearHistory}",
       "onClick={() => setActiveTab('active')}",
       "onClick={() => setActiveTab('history')}",
+      "openDeepVideoReport",
+      "revealDeepVideoArtifacts",
+      "task.task_type === 'deep_video_analysis' && task.result",
     ],
   },
 ];
