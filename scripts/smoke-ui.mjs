@@ -5,6 +5,8 @@ const files = {
   sidebar: "src/components/layout/Sidebar.tsx",
   localVideo: "src/pages/LocalVideo.tsx",
   douyinLink: "src/pages/DouyinLink.tsx",
+  settings: "src/pages/Settings.tsx",
+  taskHistory: "src/pages/TaskHistory.tsx",
 };
 
 function read(path) {
@@ -22,10 +24,19 @@ function assertRoute(app, sidebar, route) {
   assertContains(sidebar, `id: "${route}"`, `Sidebar nav ${route}`);
 }
 
+function assertCriticalNavigationPage({ route, render, navigation, content, page }) {
+  assertContains(app, `case "${route}"`, `App route ${route}`);
+  assertContains(app, render, `App render ${route}`);
+  assertContains(sidebar, navigation, `Sidebar navigation ${route}`);
+  content.forEach((needle) => assertContains(page, needle, `Page content ${route}`));
+}
+
 const app = read(files.app);
 const sidebar = read(files.sidebar);
 const localVideo = read(files.localVideo);
 const douyinLink = read(files.douyinLink);
+const settings = read(files.settings);
+const taskHistory = read(files.taskHistory);
 
 [
   "local-video",
@@ -36,6 +47,39 @@ const douyinLink = read(files.douyinLink);
   "tasks",
   "about",
 ].forEach((route) => assertRoute(app, sidebar, route));
+
+const criticalNavigationPages = [
+  {
+    route: "local-video",
+    render: "return <LocalVideo />",
+    navigation: "id: \"local-video\"",
+    page: localVideo,
+    content: ["本地视频", "handleDeepAnalyze", "证据链分析"],
+  },
+  {
+    route: "douyin-link",
+    render: "return <DouyinLink />",
+    navigation: "id: \"douyin-link\"",
+    page: douyinLink,
+    content: ["抖音链接文案提取", "开始解析", "startDeepAnalysis"],
+  },
+  {
+    route: "tasks",
+    render: "return <TaskHistory />",
+    navigation: "id: \"tasks\"",
+    page: taskHistory,
+    content: ["任务队列", "handleRefresh", "历史记录"],
+  },
+  {
+    route: "settings",
+    render: "return <Settings />",
+    navigation: "onTabChange(\"settings\")",
+    page: settings,
+    content: ["保存设置", "AI 设置状态", "网络设置"],
+  },
+];
+
+criticalNavigationPages.forEach(assertCriticalNavigationPage);
 
 assertContains(app, "register(useVideoStore.getState().setupProgressListener)", "App video listener");
 assertContains(app, "register(useDouyinLinkStore.getState().setupProgressListener)", "App Douyin listener");
