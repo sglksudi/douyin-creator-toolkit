@@ -121,6 +121,17 @@ corepack pnpm install
 powershell -ExecutionPolicy Bypass -File "./src-tauri/scripts/prepare_runtime.ps1"
 ```
 
+运行真实本地视频 smoke 前，可以先检查开发机上的 FFmpeg 运行时是否齐全：
+
+```bash
+corepack pnpm doctor:ffmpeg
+```
+
+这个检查要求 `src-tauri/resources/ffmpeg` 下同时存在：
+
+- `ffmpeg.exe`
+- `ffprobe.exe`
+
 这个脚本会完成以下工作：
 
 - 下载并整理 `python-embed` 到 `src-tauri/resources/python-embed`
